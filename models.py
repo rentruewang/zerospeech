@@ -1,14 +1,22 @@
+import numpy as np
 import torch
 from numpy import random
 from torch import cuda, nn
 from torch.nn import functional as F
 
 
-def map_end_of_syllable(index, from_len, to_len, var):
-    co = 1 if random.uniform() < .5 else -1
-    ratio = to_len/from_len
-    lam = var*ratio
-    return min([max([int(index*ratio + co*random.poisson(lam)), 0]), to_len-1])
+def halt_signals(indices, from_len, to_len, var):
+    def map_end_of_syllable(index, from_len, to_len, var):
+        co = 1 if random.uniform() < .5 else -1
+        ratio = to_len/from_len
+        lam = var*ratio
+        return min([max([int(index*ratio + co*random.poisson(lam)), 0]), to_len-1])
+    hs = []
+    if type(indices) == int:
+        return map_end_of_syllable(indices, from_len, to_len, var)
+    for i in indices:
+        hs.append(map_end_of_syllable(i, from_len, to_len, var))
+    return np.array(hs)
 
 
 class VoiceToLatent(nn.Module):
@@ -43,16 +51,14 @@ class VoiceToLatent(nn.Module):
         self.decay_factor = state_decay
         self.device = device
 
-    def forward(self, inputs, hidden_states=None):
-        '''
-        inputs: a batch of sequences -> shape: N, timesteps
-        '''
+    def forward(self, inputs, states=None):
+        # inputs: a batch of sequences -> shape: N, timesteps
         batch = inputs.shape[0]
         outputs = inputs.unsqueeze(1)
         for conv1d in self.conv1d_list:
             outputs = F.relu(conv1d(outputs), inplace=True)
         outputs = outputs.permute(2, 0, 1)
-        states = hidden_states.detach() if hidden_states is not None else \
+        states = states.detach() if states is not None else \
             torch.zeros(self.num_layers, batch, self.hidden_size)
         state_history = []
         output_history = []
@@ -88,9 +94,9 @@ class LatentToVoice(nn.Module):
         ])
 
         self.rnn_enc = nn.ModuleDict({
-            'rnn': nn.GRU(input_size=input_hidden_size, hidden_size=hidden_size,
+            'rnn': nn.GRU(input_size=input_hidden_size, hidden_size=input_hidden_size,
                           num_layers=num_layers, bidirectional=bidirectional),
-            'lin': nn.Linear(in_features=hidden_size, out_features=512)
+            'lin': nn.Linear(in_features=input_hidden_size, out_features=512)
         })
         self.hidden_size = input_hidden_size
         self.num_layers = num_layers
@@ -98,9 +104,7 @@ class LatentToVoice(nn.Module):
         self.device = device
 
     def forward(self, inputs, rnn_inputs, states_list):
-        '''
-        inputs: previous outputs -> shape: timesteps, N, channels
-        '''
+        # inputs: previous outputs -> shape: timesteps, N, channels
         assert len(inputs) == len(rnn_inputs) == len(states_list)
         l = len(inputs)
         states_history = []
@@ -131,9 +135,7 @@ class Critic(nn.Module):
         self.ns = ns
 
     def forward(self, inputs, states=None):
-        '''
-        inputs: encoded content -> shape timesteps, N, channels
-        '''
+        # inputs: encoded content -> shape timesteps, N, channels
         states = states.detach() if states is not None else torch.zeros(
             1, inputs.shape[1], self.hidden_size)
         outputs = F.relu(self.trans(inputs))
@@ -141,7 +143,7 @@ class Critic(nn.Module):
         for layer in self.rnn:
             outputs, states = layer(outputs, states)
             outputs = F.leaky_relu(outputs, negative_slope=self.ns)
-        final_score = F.sigmoid(self.score(states)).squeeze()
+        final_score = F.sigmoid(self.score(states)).squeeze_()
         return final_score
 
 
@@ -159,7 +161,7 @@ class SyllableEnds(nn.Module):
         max_b = max(B)
         assert not any([max_b-b for b in B])
         del B
-        return [F.sigmoid(self.score(s).squeeze(-1)) for s in state_list]
+        return [F.sigmoid(self.score(s).squeeze_(-1)) for s in state_list]
 
 
 class NextSyllable(nn.Module):
@@ -173,9 +175,7 @@ class NextSyllable(nn.Module):
         })
 
     def forward(self, inputs):
-        '''
-        inputs: encoded states -> shape: timesteps, N, channels
-        '''
+        # inputs: encoded states -> shape: timesteps, N, channels
         shapes = inputs.shape
         inputs = inputs.view(shapes[1], -1)
         output = F.relu(self.map['enc'](inputs))
@@ -231,11 +231,18 @@ if __name__ == "__main__":
 
     from_len = 137
     to_len = 355
-    for i in range(100):
-        r = random.randint(low=0, high=from_len)
-        print(r)
-        print(map_end_of_syllable(r, from_len, to_len, 1))
-        print()
+
+    if debug == halt_signals:
+        for i in range(100):
+            r = random.randint(low=0, high=from_len)
+            print(r)
+            print(halt_signals(r, from_len, to_len, 1))
+            print()
+        r = random.randint(0, from_len, size=[100])
+        print(r.shape)
+        h = halt_signals(r, from_len, to_len, 1)
+        print(h)
+        print(h.shape)
 
     if debug == VoiceToLatent:
         vtl = VoiceToLatent(kernel_size=kernel_size, stride=stride,
