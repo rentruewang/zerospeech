@@ -174,10 +174,13 @@ class NextSyllable(nn.Module):
                              state_hidden_size, in_features=hidden_size)
         })
 
-    def forward(self, inputs):
-        # inputs: encoded states -> shape: timesteps, N, channels
+    def forward(self, inputs, batch=False):
+        # inputs: encoded states -> shape: num_layers, N, hidden if batch else num_layers, hidden
         shapes = inputs.shape
-        inputs = inputs.view(shapes[1], -1)
+        if batch:
+            inputs = inputs.view(shapes[1], -1)
+        else:
+            inputs = inputs.view(-1)
         output = F.relu(self.map['enc'](inputs))
 
         return self.map['dec'](output).view(*shapes)

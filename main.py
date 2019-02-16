@@ -53,27 +53,39 @@ def train_on_batch(batch, timesteps, sample_var,
 
     # agent
     agent_out = agent(enc_states)
-    # to_slice: a batch of slices
-    to_slice = list(torch.stack(agent_out, dim=0).round().int().numpy())
-    to_slice = [np.argwhere(v == 1).squeeze(-1) for v in to_slice]
-    slice_interval = []
-    for tensor in to_slice:
-        slice_interval.append([tensor[i+1]-tensor[i]
-                               for i in range(len(tensor)-1)])
-    sliced_states = []
-    for sliced_indices in to_slice:
-        sliced_states.append([enc_states[i] for i in sliced_indices])
+    # agent_out: a list (len timesteps) of scores in batch
+
+    states_tensor = torch.stack(
+        enc_states, dim=0).permute(2, 0, 1, 3).contiguous()
+    agent_out_tensor = torch.stack(
+        agent_out, dim=0).round().int().permute(1, 0).numpy()
+    agent_out_tensor = random.uniform(0, 1, agent_out_tensor.shape).round()
+
+    end_states = []
+    for s, a in zip(states_tensor, agent_out_tensor):
+        end_states.append([s[i] for i in np.argwhere(a == 1).squeeze(-1)])
+
+    interval = []
+    for aot in agent_out_tensor:
+        args1 = np.argwhere(aot == 1).squeeze(-1)
+        interval.append([args1[i+1]-args1[i] for i in range(len(args1)-1)])
+    print(interval[-1][-1])
 
     # nsyl
     nsyl_out = []
-    for lst in sliced_states:
-        nsyl_out.append([nsyl(s) for s in lst])
+    for es in end_states:
+        nsyl_out.append([nsyl(es[i]) for i in range(len(es)-1)])
 
     # fstv
     fstv_out = []
-    for lst, itv in zip(sliced_states, slice_interval):
-        fstv_out.append([fstv(lst[i], lst[i+1], itv[i])
-                         for i in range(len(lst)-1)])
+    for es, itv in zip(end_states, interval):
+        lst = []
+        for t in range(len(es)-1):
+            a, b = es[t], es[t+1]
+            # shape: num_layers, hidden_size
+            a, b = a.unsqueeze(1), b.unsqueeze(1)
+            lst.append(fstv(a, b, itv[t]))
+        fstv_out.append(lst)
 
 
 def test():
@@ -89,20 +101,20 @@ def test():
 
     vtl = VoiceToLatent(kernel_size=kernel_size, stride=stride,
                         hidden_size=hidden_size, num_layers=num_layers,
-                        bidirectional=bidirectional, device=device)
+                        bidirectional=bidirectional, device=device).to(device)
     ltv = LatentToVoice(kernel_size=kernel_size, stride=stride,
                         input_hidden_size=hidden_size, num_layers=num_layers,
-                        bidirectional=bidirectional, device=device)
+                        bidirectional=bidirectional, device=device).to(device)
     inputs = torch.randn(batch, timesteps)
     out, rout, rstate = vtl(inputs)
     cri = Critic(input_size=out.shape[-1], hidden_size=hidden_size,
-                 num_layers=num_layers, categories=1)
+                 num_layers=num_layers, categories=1).to(device)
     se = SyllableEnds(state_num_layers=num_layers,
-                      state_hidden_size=hidden_size)
+                      state_hidden_size=hidden_size).to(device)
     ns = NextSyllable(state_num_layers=num_layers,
-                      state_hidden_size=hidden_size)
+                      state_hidden_size=hidden_size).to(device)
     fstv = FromStatesToVoice(state_num_layers=num_layers,
-                             state_hidden_size=hidden_size)
+                             state_hidden_size=hidden_size).to(device)
     train_on_batch(torch.randn(batch, timesteps), timesteps, 3,
                    vtl, ltv, cri, ltv, cri, cri, se, ns, fstv)
     print('test passed')
@@ -114,5 +126,5 @@ def main():
     parser.add_argument('--test', action='store_true')
 
 
-# test()
+test()
 # main()
