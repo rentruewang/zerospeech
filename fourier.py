@@ -111,7 +111,7 @@ class WavDataset(Dataset):
             new_entry = []
             for i in range(0, len(entry)-timesteps+1, timesteps):
                 new_entry.append(fft_algorithm(entry[i:i+timesteps]))
-            self.data.append(np.array(new_entry).astype(dtype).real)
+            self.data.append(np.absolute(np.array(new_entry).astype(dtype)))
         self.data = [torch.tensor(d, device=device) for d in self.data]
 
     def __len__(self):
