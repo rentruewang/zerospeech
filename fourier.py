@@ -4,7 +4,7 @@ from os import listdir, path
 import numpy as np
 import torch
 from numpy import random
-from numpy.fft import fft, rfft
+from numpy.fft import fft
 from scipy.io import wavfile
 from sklearn.cluster import KMeans
 from torch import cuda, nn, optim
@@ -72,13 +72,13 @@ def history(dataset, module, device='cpu', rnn=True):
     if rnn:
         states = [torch.zeros([1, 1, h], device=device)
                   for h in module.hidden_sizes]
-        for data in dataset:
+        for data, source, speaker in dataset:
             for d in data:
                 d = d.view(1, 1, -1)
                 out, states = module(d, states)
                 outputs.append(out.detach().numpy().squeeze())
     else:
-        for data in dataset:
+        for data, source, speaker in dataset:
             out = module(data)
             outputs.extend([o for o in out.detach().numpy()])
     return outputs
@@ -97,10 +97,15 @@ class WavDataset(Dataset):
 
         files = listdir(dirname)
         rate, data = [], []
+        source, speaker = [], []
         for f in files:
+            src = f[0]
+            spk = int(f[1:4])
             r, d = wavfile.read(path.join(dirname, f))
             rate.append(r)
             data.append(d)
+            source.append(src)
+            speaker.append(spk)
 
         self.rate = sum(rate)//len(rate)
         assert not any([r-self.rate for r in rate])
@@ -113,12 +118,28 @@ class WavDataset(Dataset):
                 new_entry.append(fft_algorithm(entry[i:i+timesteps]))
             self.data.append(np.absolute(np.array(new_entry).astype(dtype)))
         self.data = [torch.tensor(d, device=device) for d in self.data]
+        self.source = source
+        speaker = self.reduce_speaker(speaker)
+        self.speaker = [torch.tensor([s], device=device) for s in speaker]
 
     def __len__(self):
-        return len(self.data)
+        assert len(self.data) == len(self.source) == len(self.speaker)
+        return len(self.speaker)
 
     def __getitem__(self, index):
-        return self.data[index]
+        return self.data[index], self.source[index], self.speaker[index]
+
+    def reduce_speaker(self, speaker):
+        speaker_list = []
+        for i in speaker:
+            if i in speaker_list:
+                pass
+            else:
+                speaker_list.append(i)
+        reduced = dict([(elem, i) for i, elem in enumerate(speaker_list)])
+        for i in range(len(speaker)):
+            speaker[i] = reduced[speaker[i]]
+        return speaker
 
 
 class FetchData:
@@ -315,12 +336,11 @@ if __name__ == "__main__":
     parser.add_argument('-l', '--latent', type=int, default=200)
     parser.add_argument('-n', '--num_layers', type=int, default=3)
     parser.add_argument('-lr', '--learning_rate', type=float, default=1e-2)
-    parser.add_argument('-dv', '--device', type=str, default='cpu')
+    parser.add_argument('-dv', '--device', type=str, default='cuda')
     parser.add_argument('-ln', '--linear', action='store_true')
-    parser.add_argument('-rf', '--rfft', action='store_true')
-    parser.add_argument('-ns', '--n_speakers', type=int, default=2)
     parser.add_argument('-K', '--n_clusters', type=int, default=500)
     parser.add_argument('-ts', '--test', action='store_true')
+    parser.add_argument('-nc', '--noclass', action='store_true')
     args = parser.parse_args()
 
     epochs = args.epochs
@@ -332,9 +352,9 @@ if __name__ == "__main__":
     lr = args.learning_rate
     rnn = not args.linear
     num_layers = args.num_layers
-    n_speakers = args.n_speakers
     n_clusters = args.n_clusters
     is_test = args.test
+    noclass = args.noclass
 
     fetch = FetchData()
     # train_data = fetch(
@@ -351,6 +371,14 @@ if __name__ == "__main__":
         stepspersec = train_data.rate//timesteps
     elif stepspersec:
         timesteps = train_data.rate//stepspersec
+
+    speaker_dict = {}
+    for speaker_num in train_data.speaker:
+        try:
+            speaker_dict[speaker_num] += 1
+        except KeyError:
+            speaker_dict[speaker_num] = 1
+    n_speakers = len([n for n in speaker_dict.keys()])
 
     enc = Module(input_len=timesteps, output_len=latent,
                  rnn=rnn, num_layers=num_layers)
@@ -378,19 +406,21 @@ if __name__ == "__main__":
         print('vae epoch: {}/{}'.format(epoch, epochs))
 
         for index in range(len(train_data)):
-            input_data = train_data[index].unsqueeze(
-                1) if rnn else train_data[index]
-            train_vae(input_data, None, [enc, enc_optim], [
-                      dec, dec_optim], [cls1, cls1_optim], rnn, device, True)
+            input_data = train_data[index][0].unsqueeze(
+                1) if rnn else train_data[index][0]
+            input_speaker = train_data[index][2]
+            train_vae(input_data, input_speaker, [enc, enc_optim], [
+                      dec, dec_optim], [cls1, cls1_optim], rnn, device, noclass)
 
     for epoch in range(1, epochs+1):
         print('gan epoch: {}/{}'.format(epoch, epochs))
 
         for index in range(len(train_data)):
-            input_data = train_data[index].unsqueeze(
-                1) if rnn else train_data[index]
-            train_gan(input_data, None, [enc, enc_optim], [dec, dec_optim], [
-                      gen, gen_optim], [cls2, cls2_optim], [dis, dis_optim],  rnn, device, True)
+            input_data = train_data[index][0].unsqueeze(
+                1) if rnn else train_data[index][0]
+            input_speaker = train_data[index][2]
+            train_gan(input_data, input_speaker, [enc, enc_optim], [dec, dec_optim], [
+                      gen, gen_optim], [cls2, cls2_optim], [dis, dis_optim],  rnn, device, noclass)
 
     ht = history(train_data, enc, device=device, rnn=rnn)
     kmeans = k_means(True)(n_clusters=n_clusters)
@@ -403,7 +433,7 @@ if __name__ == "__main__":
     for epoch in range(1, epochs+1):
         print('target epoch: {}/{}'.format(epoch, epochs))
 
-        for data in train_data:
+        for data, source, speaker in train_data:
             cls_list = []
             real_output = []
             output = []
