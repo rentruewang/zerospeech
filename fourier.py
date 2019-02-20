@@ -449,6 +449,7 @@ if __name__ == "__main__":
     parser.add_argument('-nc', '--noclass', action='store_true')
     parser.add_argument('-wd', '--weight_dir', type=str, default='_weight_dir')
     parser.add_argument('-ds', '--dontsave', action='store_true')
+    parser.add_argument('-rs', '--restart', action='store_true')
     args = parser.parse_args()
 
     epochs = args.epochs
@@ -466,6 +467,7 @@ if __name__ == "__main__":
     noclass = args.noclass
     weight_dir = args.weight_dir
     save = not args.dontsave
+    restart = args.restart
 
     if save:
         makedirs(weight_dir, exist_ok=True)
@@ -493,48 +495,39 @@ if __name__ == "__main__":
     n_speakers = len([n for n in speaker_dict.keys()])
 
     enc_path = path.join(weight_dir, 'enc.pt')
-    enc = torch.load(enc_path, map_location=device) if path.exists(enc_path) \
-        else Module(input_len=timesteps, output_len=latent,
-                    rnn=rnn, num_layers=num_layers).to(device)
+    enc = Module(input_len=timesteps, output_len=latent,
+                 rnn=rnn, num_layers=num_layers).to(device)
 
     dec_path = path.join(weight_dir, 'dec.pt')
-    dec = torch.load(dec_path, map_location=device) if path.exists(dec_path) \
-        else Module(input_len=latent, output_len=timesteps,
-                    rnn=rnn, num_layers=num_layers)
+    dec = Module(input_len=latent, output_len=timesteps,
+                 rnn=rnn, num_layers=num_layers)
 
     dis_path = path.join(weight_dir, 'dis.pt')
-    dis = torch.load(dis_path, map_location=device) if path.exists(dis_path) \
-        else Module(input_len=timesteps, output_len=1,
-                    rnn=True, num_layers=num_layers)
+    dis = Module(input_len=timesteps, output_len=1,
+                 rnn=True, num_layers=num_layers)
 
     gen_path = path.join(weight_dir, 'gen.pt')
-    gen = torch.load(gen_path, map_location=device) if path.exists(gen_path) \
-        else Module(input_len=latent, output_len=timesteps,
-                    rnn=rnn, num_layers=num_layers)
+    gen = Module(input_len=latent, output_len=timesteps,
+                 rnn=rnn, num_layers=num_layers)
 
     cls1_path = path.join(weight_dir, 'cls1.pt')
-    cls1 = torch.load(cls1_path, map_location=device) if path.exists(cls1_path) \
-        else Module(input_len=latent, output_len=n_speakers,
-                    rnn=True, num_layers=num_layers)
+    cls1 = Module(input_len=latent, output_len=n_speakers,
+                  rnn=True, num_layers=num_layers)
 
     cls2_path = path.join(weight_dir, 'cls2.pt')
-    cls2 = torch.load(cls2_path, map_location=device) if path.exists(cls2_path) \
-        else Module(input_len=timesteps, output_len=n_speakers,
-                    rnn=True, num_layers=num_layers)
+    cls2 = Module(input_len=timesteps, output_len=n_speakers,
+                  rnn=True, num_layers=num_layers)
     eos_path = path.join(weight_dir, 'eos.pt')
-    eos = torch.load(eos_path, map_location=device) if path.exists(eos_path) \
-        else Module(input_len=latent, output_len=2,
-                    rnn=True, num_layers=num_layers)
+    eos = Module(input_len=latent, output_len=2,
+                 rnn=True, num_layers=num_layers)
 
     ldis_path = path.join(weight_dir, 'ldis.pt')
-    ldis = torch.load(ldis_path, map_location=device) if path.exists(ldis_path) \
-        else Module(input_len=latent, output_len=1,
-                    rnn=True, num_layers=num_layers)
+    ldis = Module(input_len=latent, output_len=1,
+                  rnn=True, num_layers=num_layers)
 
     td_path = path.join(weight_dir, 'td.pt')
-    target_dec = torch.load(td_path, map_location=device) if path.exists(td_path) \
-        else Module(input_len=n_clusters, output_len=dec.output_len,
-                    num_layers=num_layers, rnn=rnn)
+    target_dec = Module(input_len=n_clusters, output_len=dec.output_len,
+                        num_layers=num_layers, rnn=rnn)
 
     enc_optim = optim.RMSprop(params=enc.parameters(), lr=lr)
     dec_optim = optim.RMSprop(params=dec.parameters(), lr=lr)
@@ -545,6 +538,70 @@ if __name__ == "__main__":
     eos_optim = optim.RMSprop(params=eos.parameters(), lr=lr)
     ldis_optim = optim.RMSprop(params=ldis.parameters(), lr=lr)
     td_optim = optim.RMSprop(params=target_dec.parameters(), lr=lr)
+
+    if not restart:
+        try:
+            enc_dict = torch.load(enc_path, map_location=device)
+            enc.load_state_dict(enc_dict['module'])
+            enc_optim.load_state_dict(enc_dict['optim'])
+        except (FileNotFoundError, RuntimeError):
+            print('retrain enc')
+
+        try:
+            dec_dict = torch.load(dec_path, map_location=device)
+            dec.load_state_dict(dec_dict['module'])
+            dec_optim.load_state_dict(dec_dict['optim'])
+        except (FileNotFoundError, RuntimeError):
+            print('retrain dec')
+
+        try:
+            dis_dict = torch.load(dis_path, map_location=device)
+            dis.load_state_dict(dis_dict['module'])
+            dis_optim.load_state_dict(dis_dict['optim'])
+        except (FileNotFoundError, RuntimeError):
+            print('retrain dis')
+
+        try:
+            gen_dict = torch.load(gen_path, map_location=device)
+            gen.load_state_dict(gen_dict['module'])
+            gen_optim.load_state_dict(gen_dict['optim'])
+        except (FileNotFoundError, RuntimeError):
+            print('retrain gen')
+
+        try:
+            cls1_dict = torch.load(cls1_path, map_location=device)
+            cls1.load_state_dict(cls1_dict['module'])
+            cls1_optim.load_state_dict(cls1_dict['optim'])
+        except (FileNotFoundError, RuntimeError):
+            print('retrain cls1')
+
+        try:
+            cls2_dict = torch.load(cls2_path, map_location=device)
+            cls2.load_state_dict(cls2_dict['module'])
+            cls2_optim.load_state_dict(cls2_dict['optim'])
+        except (FileNotFoundError, RuntimeError):
+            print('retrain cls2')
+
+        try:
+            eos_dict = torch.load(eos_path, map_location=device)
+            eos.load_state_dict(eos_dict['module'])
+            eos_optim.load_state_dict(eos_dict['optim'])
+        except (FileNotFoundError, RuntimeError):
+            print('retrain eos')
+
+        try:
+            ldis_dict = torch.load(ldis_path, map_location=device)
+            ldis.load_state_dict(ldis_dict['module'])
+            ldis_optim.load_state_dict(ldis_dict['optim'])
+        except (FileNotFoundError, RuntimeError):
+            print('retrain ldis')
+
+        try:
+            td_dict = torch.load(td_path, map_location=device)
+            target_dec.load_state_dict(td_dict['module'])
+            td_optim.load_state_dict(td_dict['optim'])
+        except (FileNotFoundError, RuntimeError):
+            print('retrain target_dec')
 
     for epoch in range(1, epochs+1):
         print('vae epoch: {}/{}'.format(epoch, epochs))
@@ -592,7 +649,7 @@ if __name__ == "__main__":
                    dec, dec_optim], [target_dec, td_optim], kmeans, rnn, device)
 
         if save:
-            torch.save({'module:': target_dec.state_dict(),
+            torch.save({'module': target_dec.state_dict(),
                         'optim': td_optim.state_dict()}, f=td_path)
 
     for epoch in range(1, episodes+1):
@@ -603,3 +660,5 @@ if __name__ == "__main__":
         if save:
             torch.save({'module': eos.state_dict(),
                         'optim': eos_optim.state_dict()}, f=eos_path)
+            torch.save({'module': ldis.state_dict(),
+                        'optim': ldis_optim.state_dict()}, f=ldis_path)
