@@ -1,5 +1,5 @@
 .vscode
 english*
 *.backup
-__*
+_*
 test.py

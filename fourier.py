@@ -1,5 +1,5 @@
 from argparse import ArgumentParser
-from os import listdir, path
+from os import listdir, makedirs, path
 
 import numpy as np
 import torch
@@ -8,6 +8,7 @@ from numpy.fft import fft
 from scipy.io import wavfile
 from sklearn.cluster import KMeans
 from torch import cuda, nn, optim
+from torch.distributions import Categorical
 from torch.nn import functional as F
 from torch.utils.data import DataLoader, Dataset
 
@@ -189,7 +190,7 @@ class Module(nn.Module):
         self.layers = nn.ModuleList(module_list)
 
     def forward(self, inputs, states=None):
-        # inputs: if rnn: timestep=1, N, out else: N,out
+        # inputs: if rnn: timesteps, N, out else: N,out
         if self.rnn:
             for i, layer in enumerate(self.layers[:-1]):
                 inputs, states[i] = layer(inputs, states[i].detach())
@@ -293,9 +294,9 @@ def train_gan(data, from_speaker, enc, dec, gen, cls2, dis,
         cls2_optim.step()
 
     real_loss = F.binary_cross_entropy(
-        F.sigmoid(dis_real[-1]), torch.tensor([[1.]], device=device))
+        torch.sigmoid(dis_real[-1]), torch.tensor([[1.]], device=device))
     fake_loss = F.binary_cross_entropy(
-        F.sigmoid(dis_fake[-1]), torch.tensor([[0.]], device=device))
+        torch.sigmoid(dis_fake[-1]), torch.tensor([[0.]], device=device))
     loss = real_loss+fake_loss
 
     dis_optim.zero_grad()
@@ -311,25 +312,130 @@ def train_gan(data, from_speaker, enc, dec, gen, cls2, dis,
     gen_optim.step()
 
 
-def train_ddec(inputs, target, dec, rnn=True):
-    dec, dec_optim = dec
-    if rnn:
-        states = [torch.zeros([1, 1, h]) for h in dec.hidden_sizes]
-        output, _ = dec(inputs, states)
+def train_ddec(train_data, enc, dec, target_dec, kmeans, rnn=True, device='cpu'):
+    enc, _ = enc
+    dec, _ = dec
+    target_dec, td_optim = target_dec
 
-    else:
-        output = dec(inputs)
+    for data, source, speaker in train_data:
+        if rnn:
+            e_states = [torch.zeros([1, 1, h], device=device)
+                        for h in enc.hidden_sizes]
+            d_states = [torch.zeros([1, 1, h], device=device)
+                        for h in dec.hidden_sizes]
+            td_states = [torch.zeros([1, 1, h], device=device)
+                         for h in target_dec.hidden_sizes]
 
-    loss = F.mse_loss(output, target)
+            encoded, _ = enc(data.unsqueeze(1), e_states)
+            cls = kmeans.predict(encoded.detach().numpy().squeeze(1))
+            cls = torch.from_numpy(np.expand_dims(
+                np.array([one_hot(c, n_clusters) for c in cls]), axis=1)).to(device)
+            output, _ = target_dec(cls, td_states)
+            real_output, _ = dec(encoded, d_states)
 
-    dec_optim.zero_grad()
-    loss.backward()
-    dec_optim.step()
+        else:
+            cls_list = []
+            encoded = enc(data)
+            cls = kmeans.predict(encoded.detach().numpy())
+            cls = torch.from_numpy(
+                np.array([one_hot(c, n_clusters) for c in cls])).to(device)
+            output = target_dec(cls)
+            real_output = dec(encoded)
+
+        loss = F.mse_loss(real_output, output)
+
+        td_optim.zero_grad()
+        loss.backward()
+        td_optim.step()
+
+
+# trained using reinforcement learning
+def shuffle(action_list, input_sentence):
+    assert len(action_list) == len(input_sentence)
+    res = []
+    index = 0
+    for i in range(len(action_list)-1):
+        if action_list[i].item() == 1:
+            res.append(input_sentence[index:i+1])
+            index = i+1
+    if index != len(action_list):
+        res.append(input_sentence[index:])
+    random.shuffle(res)
+    result = sum(res, [])
+    return torch.stack(result, dim=0)
+
+
+def train_eos(train_data, enc, eos, ldis, rnn=True, device='cpu'):
+    enc, _ = enc
+    eos, eos_optim = eos
+    ldis, dis_optim = ldis
+
+    for data, _, _ in train_data:
+        temporal_output = []
+        log_prob = []
+        past_actions = []
+        eos_states = [torch.zeros([1, 1, h], device=device)
+                      for h in eos.hidden_sizes]
+        if rnn:
+            enc_states = [torch.zeros([1, 1, h], device=device)
+                          for h in enc.hidden_sizes]
+            data = data.unsqueeze(1)
+            for d in data:
+                d = d.view(1, 1, -1)
+                encoded, enc_states = enc(d, enc_states)
+                h, eos_states = eos(encoded, eos_states)
+
+                softmax_output = F.softmax(h, -1)
+                dist = Categorical(softmax_output)
+                action_taken = dist.sample()
+                log_prob.append(dist.log_prob(action_taken).squeeze())
+                temporal_output.append(encoded.squeeze())
+                past_actions.append(action_taken)
+
+        else:
+            encoded = enc(data)
+            for e in encoded:
+                e = e.view(1, 1, -1)
+                h, enc_states = eos(e, eos_states)
+                softmax_output = F.softmax(h, -1)
+                dist = Categorical(softmax_output)
+                action_taken = dist.sample()
+                log_prob.append(dist.log_prob(action_taken).squeeze())
+                temporal_output.append(e.squeeze())
+                past_actions.append(action_taken)
+        shuffled_output = shuffle(past_actions, temporal_output).unsqueeze_(1)
+
+        if rnn:
+            enc_states = [torch.zeros([1, 1, h], device=device)
+                          for h in enc.hidden_sizes]
+            encoded, _ = enc(data, enc_states)
+        else:
+            encoded = enc(data)
+            encoded = encoded.unsqueeze_(1)
+        dis_states = [torch.zeros([1, 1, h], device=device)
+                      for h in ldis.hidden_sizes]
+        F_output, _ = ldis(shuffled_output, dis_states.copy())
+        T_output, _ = ldis(encoded, dis_states.copy())
+
+        loss = F.binary_cross_entropy(torch.sigmoid(F_output[-1]).sum(), torch.tensor(0., device=device)) + \
+            F.binary_cross_entropy(
+                torch.sigmoid(T_output[-1]).sum(), torch.tensor(0., device=device))
+        dis_optim.zero_grad()
+        loss.backward(retain_graph=True)
+        dis_optim.step()
+
+        loss = torch.tensor(0., device=device)
+        for log_p in log_prob:
+            loss -= log_p*torch.sigmoid(F_output[-1]).sum().item()
+        eos_optim.zero_grad()
+        loss.backward()
+        eos_optim.step()
 
 
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument('-e', '--epochs', type=int, required=True)
+    parser.add_argument('-E', '--episodes', type=int, required=True)
     parser.add_argument('-t', '--timesteps', type=int, default=None)
     parser.add_argument('-s', '--stepspersec', type=int, default=None)
     parser.add_argument('-dr', '--dir', type=str, required=True)
@@ -341,9 +447,12 @@ if __name__ == "__main__":
     parser.add_argument('-K', '--n_clusters', type=int, default=500)
     parser.add_argument('-ts', '--test', action='store_true')
     parser.add_argument('-nc', '--noclass', action='store_true')
+    parser.add_argument('-wd', '--weight_dir', type=str, default='_weight_dir')
+    parser.add_argument('-ds', '--dontsave', action='store_true')
     args = parser.parse_args()
 
     epochs = args.epochs
+    episodes = args.episodes
     timesteps = args.timesteps
     stepspersec = args.stepspersec
     latent = args.latent
@@ -355,10 +464,13 @@ if __name__ == "__main__":
     n_clusters = args.n_clusters
     is_test = args.test
     noclass = args.noclass
+    weight_dir = args.weight_dir
+    save = not args.dontsave
+
+    if save:
+        makedirs(weight_dir, exist_ok=True)
 
     fetch = FetchData()
-    # train_data = fetch(
-    #     dirname, [FetchData.TRAIN, 'unit'], (fft, timesteps), device)
     if not xor(timesteps, stepspersec):
         raise ValueError('not timesteps xor stepspersec')
     if is_test:
@@ -380,20 +492,49 @@ if __name__ == "__main__":
             speaker_dict[speaker_num] = 1
     n_speakers = len([n for n in speaker_dict.keys()])
 
-    enc = Module(input_len=timesteps, output_len=latent,
-                 rnn=rnn, num_layers=num_layers)
-    dec = Module(input_len=latent, output_len=timesteps,
-                 rnn=rnn, num_layers=num_layers)
-    dis = Module(input_len=timesteps, output_len=1,
-                 rnn=True, num_layers=num_layers)
-    gen = Module(input_len=latent, output_len=timesteps,
-                 rnn=rnn, num_layers=num_layers)
-    cls1 = Module(input_len=latent, output_len=n_speakers,
-                  rnn=True, num_layers=num_layers)
-    cls2 = Module(input_len=timesteps, output_len=n_speakers,
-                  rnn=True, num_layers=num_layers)
-    toslice = Module(input_len=latent, output_len=n_speakers,
-                     rnn=True, num_layers=num_layers)
+    enc_path = path.join(weight_dir, 'enc.pt')
+    enc = torch.load(enc_path, map_location=device) if path.exists(enc_path) \
+        else Module(input_len=timesteps, output_len=latent,
+                    rnn=rnn, num_layers=num_layers).to(device)
+
+    dec_path = path.join(weight_dir, 'dec.pt')
+    dec = torch.load(dec_path, map_location=device) if path.exists(dec_path) \
+        else Module(input_len=latent, output_len=timesteps,
+                    rnn=rnn, num_layers=num_layers)
+
+    dis_path = path.join(weight_dir, 'dis.pt')
+    dis = torch.load(dis_path, map_location=device) if path.exists(dis_path) \
+        else Module(input_len=timesteps, output_len=1,
+                    rnn=True, num_layers=num_layers)
+
+    gen_path = path.join(weight_dir, 'gen.pt')
+    gen = torch.load(gen_path, map_location=device) if path.exists(gen_path) \
+        else Module(input_len=latent, output_len=timesteps,
+                    rnn=rnn, num_layers=num_layers)
+
+    cls1_path = path.join(weight_dir, 'cls1.pt')
+    cls1 = torch.load(cls1_path, map_location=device) if path.exists(cls1_path) \
+        else Module(input_len=latent, output_len=n_speakers,
+                    rnn=True, num_layers=num_layers)
+
+    cls2_path = path.join(weight_dir, 'cls2.pt')
+    cls2 = torch.load(cls2_path, map_location=device) if path.exists(cls2_path) \
+        else Module(input_len=timesteps, output_len=n_speakers,
+                    rnn=True, num_layers=num_layers)
+    eos_path = path.join(weight_dir, 'eos.pt')
+    eos = torch.load(eos_path, map_location=device) if path.exists(eos_path) \
+        else Module(input_len=latent, output_len=2,
+                    rnn=True, num_layers=num_layers)
+
+    ldis_path = path.join(weight_dir, 'ldis.pt')
+    ldis = torch.load(ldis_path, map_location=device) if path.exists(ldis_path) \
+        else Module(input_len=latent, output_len=1,
+                    rnn=True, num_layers=num_layers)
+
+    td_path = path.join(weight_dir, 'td.pt')
+    target_dec = torch.load(td_path, map_location=device) if path.exists(td_path) \
+        else Module(input_len=n_clusters, output_len=dec.output_len,
+                    num_layers=num_layers, rnn=rnn)
 
     enc_optim = optim.RMSprop(params=enc.parameters(), lr=lr)
     dec_optim = optim.RMSprop(params=dec.parameters(), lr=lr)
@@ -401,6 +542,9 @@ if __name__ == "__main__":
     gen_optim = optim.RMSprop(params=gen.parameters(), lr=lr)
     cls1_optim = optim.RMSprop(params=cls1.parameters(), lr=lr)
     cls2_optim = optim.RMSprop(params=cls2.parameters(), lr=lr)
+    eos_optim = optim.RMSprop(params=eos.parameters(), lr=lr)
+    ldis_optim = optim.RMSprop(params=ldis.parameters(), lr=lr)
+    td_optim = optim.RMSprop(params=target_dec.parameters(), lr=lr)
 
     for epoch in range(1, epochs+1):
         print('vae epoch: {}/{}'.format(epoch, epochs))
@@ -412,6 +556,14 @@ if __name__ == "__main__":
             train_vae(input_data, input_speaker, [enc, enc_optim], [
                       dec, dec_optim], [cls1, cls1_optim], rnn, device, noclass)
 
+        if save:
+            torch.save({'module': enc.state_dict(),
+                        'optim': enc_optim.state_dict()}, f=enc_path)
+            torch.save({'module': dec.state_dict(),
+                        'optim': dec_optim.state_dict()}, f=dec_path)
+            torch.save({'module': cls1.state_dict(),
+                        'optim': cls1_optim.state_dict()}, f=cls1_path)
+
     for epoch in range(1, epochs+1):
         print('gan epoch: {}/{}'.format(epoch, epochs))
 
@@ -422,53 +574,32 @@ if __name__ == "__main__":
             train_gan(input_data, input_speaker, [enc, enc_optim], [dec, dec_optim], [
                       gen, gen_optim], [cls2, cls2_optim], [dis, dis_optim],  rnn, device, noclass)
 
+        if save:
+            torch.save({'module': gen.state_dict(),
+                        'optim': gen_optim.state_dict()}, f=gen_path)
+            torch.save({'module': dis.state_dict(),
+                        'optim': dis_optim.state_dict()}, f=dis_path)
+            torch.save({'module': cls2.state_dict(),
+                        'optim': cls2_optim.state_dict()}, f=cls2_path)
+
     ht = history(train_data, enc, device=device, rnn=rnn)
     kmeans = k_means(True)(n_clusters=n_clusters)
     kmeans.fit(ht)
 
-    target_dec = Module(input_len=n_clusters, output_len=dec.output_len,
-                        num_layers=num_layers, rnn=rnn)
-    td_optim = optim.RMSprop(target_dec.parameters(), lr=lr)
-
     for epoch in range(1, epochs+1):
         print('target epoch: {}/{}'.format(epoch, epochs))
+        train_ddec(train_data, [enc, enc_optim], [
+                   dec, dec_optim], [target_dec, td_optim], kmeans, rnn, device)
 
-        for data, source, speaker in train_data:
-            cls_list = []
-            real_output = []
-            output = []
+        if save:
+            torch.save({'module:': target_dec.state_dict(),
+                        'optim': td_optim.state_dict()}, f=td_path)
 
-            if rnn:
-                e_states = [torch.zeros([1, 1, h], device=device)
-                            for h in enc.hidden_sizes]
-                d_states = [torch.zeros([1, 1, h], device=device)
-                            for h in dec.hidden_sizes]
-                td_states = [torch.zeros([1, 1, h], device=device)
-                             for h in target_dec.hidden_sizes]
-                for d in data:
-                    d = d.view(1, 1, -1)
-                    encoded, e_states = enc(d, e_states)
-                    cls = kmeans.predict(encoded.detach().numpy().squeeze(1))
-                    cls = torch.from_numpy(
-                        one_hot(cls, n_clusters).reshape([1, 1, -1])).to(device)
-                    d_out, d_states = dec(encoded, d_states)
-                    real_output.append(d_out)
-                    td_out, td_states = target_dec(cls, td_states)
-                    output.append(td_out)
+    for epoch in range(1, episodes+1):
+        print('End of sentence episode: {}/{}'.format(epoch, epochs))
+        train_eos(train_data, [enc, enc_optim], [
+                  eos, eos_optim], [ldis, ldis_optim], rnn, device)
 
-                real_output = torch.cat(real_output, dim=0)
-                output = torch.cat(output, dim=0)
-
-            else:
-                encoded = enc(data)
-                cls = kmeans.predict(encoded.detach().numpy().squeeze())
-                cls_list.extend([torch.from_numpy(
-                    one_hot(c, size=n_clusters)).to(device) for c in cls])
-                output = target_dec(torch.stack(cls_list, dim=0))
-                real_output = dec(encoded)
-
-            loss = F.mse_loss(real_output, output)
-
-            td_optim.zero_grad()
-            loss.backward()
-            td_optim.step()
+        if save:
+            torch.save({'module': eos.state_dict(),
+                        'optim': eos_optim.state_dict()}, f=eos_path)
