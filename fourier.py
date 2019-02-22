@@ -230,7 +230,7 @@ def train_vae(data, from_speaker, enc, dec, cls1,
             1), [s.clone() for s in cls_states])
 
     if not noclass:
-        closs = F.cross_entropy(F.softmax(cls_out[-1], -1), from_speaker)
+        closs = F.cross_entropy(cls_out[-1], from_speaker)
 
         cls1_optim.zero_grad()
         closs.backward(retain_graph=True)
@@ -287,7 +287,7 @@ def train_gan(data, from_speaker, enc, dec, gen, cls2, dis,
         dis_fake, _ = dis(output.unsqueeze(1), [d.clone() for d in dis_states])
 
     if not noclass:
-        closs = F.cross_entropy(F.softmax(cls_out[-1], -1), from_speaker)
+        closs = F.cross_entropy(cls_out[-1], from_speaker)
 
         cls2_optim.zero_grad()
         closs.backward(retain_graph=True)
