@@ -12,8 +12,8 @@ from torch.distributions import Categorical
 from torch.nn import functional as F
 from torch.utils.data import DataLoader, Dataset
 
-# utilities
 
+# utilities
 
 def xor(a, b):
     a = True if a else False
@@ -204,8 +204,20 @@ class Module(nn.Module):
         return outputs
 
 
-# training loops
+class Decoder(nn.Module):
+    def __init__(self, module, *args, **kwargs):
+        super().__init__()
+        self.module = nn.Module(*args, **kwargs)
+        self.linear = nn.Linear(
+            in_features=module.input_len+1, out_features=module.output_len)
 
+    def forward(self, inputs, cls, states=None):
+        outputs = self.module(inputs, states)
+        net = torch.cat([outputs, cls], -1)
+        return self.linear(net)
+
+
+# training loops
 def train_vae(data, from_speaker, enc, dec, cls1,
               rnn=True, device='cpu', noclass=True):
     enc, enc_optim = enc
@@ -217,7 +229,7 @@ def train_vae(data, from_speaker, enc, dec, cls1,
         enc_out, _ = enc(data, enc_states)
         dec_states = [torch.zeros([1, 1, h], device=device)
                       for h in dec.hidden_sizes]
-        dec_out, _ = dec(enc_out, dec_states)
+        dec_out, _ = dec(enc_out, from_speaker, dec_states)
         cls_states = [torch.zeros([1, 1, h], device=device)
                       for h in cls1.hidden_sizes]
         cls_out, _ = cls1(enc_out, cls_states)
@@ -260,7 +272,7 @@ def train_gan(data, from_speaker, enc, dec, gen, cls2, dis,
         enc_out, _ = enc(data, enc_states)
         dec_states = [torch.zeros([1, 1, h], device=device)
                       for h in dec.hidden_sizes]
-        dec_out, _ = dec(enc_out, dec_states)
+        dec_out, _ = dec(enc_out, from_speaker, dec_states)
         gen_states = [torch.zeros([1, 1, h], device=device)
                       for h in gen.hidden_sizes]
         gen_out, _ = gen(enc_out, gen_states)
@@ -499,8 +511,8 @@ if __name__ == "__main__":
                  rnn=rnn, num_layers=num_layers).to(device)
 
     dec_path = path.join(weight_dir, 'dec.pt')
-    dec = Module(input_len=latent, output_len=timesteps,
-                 rnn=rnn, num_layers=num_layers)
+    dec = Decoder(input_len=latent, output_len=timesteps,
+                  rnn=rnn, num_layers=num_layers)
 
     dis_path = path.join(weight_dir, 'dis.pt')
     dis = Module(input_len=timesteps, output_len=1,
