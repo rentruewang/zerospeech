@@ -3,3 +3,4 @@ english*
 *.backup
 _*
 test.py
+data
