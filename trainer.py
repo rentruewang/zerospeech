@@ -5,7 +5,6 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn, optim
-from torch.autograd import Variable
 
 from model import PatchDiscriminator
 from parallages import VariationalDecoder as Decoder
@@ -110,7 +109,7 @@ class Trainer(object):
         self.target_loader = target_loader
 
     def set_eval(self):
-        self.testing_shift_c = Variable(torch.from_numpy(
+        self.testing_shift_c = torch.tensor(torch.from_numpy(
             np.array([int(self.hps.n_speakers-self.hps.n_target_speakers)]))).cuda()
         self.Encoder.eval()
         self.Decoder.eval()
@@ -141,7 +140,7 @@ class Trainer(object):
         return C, X
 
     def sample_c(self, size):
-        c_sample = Variable(torch.multinomial(self.sample_weights,
+        c_sample = torch.tensor(torch.multinomial(self.sample_weights,
                                               num_samples=size, replacement=True),
                             requires_grad=False)
         c_sample = c_sample.cuda() if torch.cuda.is_available() else c_sample

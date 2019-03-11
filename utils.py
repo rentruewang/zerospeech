@@ -2,7 +2,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 from tensorboardX import SummaryWriter
-from torch.autograd import Variable
 
 
 def cc(net):
@@ -19,7 +18,7 @@ def gen_noise(x_dim, y_dim):
 
 
 def cal_mean_grad(net):
-    grad = Variable(torch.FloatTensor([0])).cuda()
+    grad = torch.tensor(torch.FloatTensor([0])).cuda()
     for i, p in enumerate(net.parameters()):
         grad += torch.mean(p.grad)
     return grad.data[0] / (i + 1)
@@ -32,7 +31,7 @@ def multiply_grad(nets, c):
 
 
 def to_var(x, requires_grad=True):
-    x = Variable(x, requires_grad=requires_grad)
+    x = torch.tensor(x, requires_grad=requires_grad)
     return x.cuda() if torch.cuda.is_available() else x
 
 
@@ -50,7 +49,7 @@ def calculate_gradients_penalty(netD, real_data, fake_data):
     alpha = torch.rand(real_data.size(0))
     alpha = alpha.view(real_data.size(0), 1, 1)
     alpha = alpha.cuda() if torch.cuda.is_available() else alpha
-    alpha = Variable(alpha)
+    alpha = torch.tensor(alpha)
     interpolates = alpha * real_data + (1 - alpha) * fake_data
 
     disc_interpolates = netD(interpolates)

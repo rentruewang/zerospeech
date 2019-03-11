@@ -194,7 +194,7 @@ class VariationalEncoder(nn.Module):
 
 class VariationalSpeakerClassifier(nn.Module):
     def __init__(self, c_in=512, c_h=512, n_class=8, dp=0.1, ns=0.01, seg_len=128):
-        super(SpeakerClassifier, self).__init__()
+        super().__init__()
         self.dp, self.ns = dp, ns
         self.conv1 = nn.Conv1d(c_in, c_h, kernel_size=5)
         self.conv2 = nn.Conv1d(c_h, c_h, kernel_size=5)

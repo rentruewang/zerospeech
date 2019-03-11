@@ -8,7 +8,7 @@ import torch
 from torch.utils import data
 
 
-class DataLoader(object):
+class DataLoader:
     def __init__(self, dataset, batch_size=16):
         self.dataset = dataset
         self.n_elements = len(self.dataset[0])

@@ -10,7 +10,6 @@ import soundfile as sf
 import torch
 from scipy import signal
 from scipy.io.wavfile import write
-from torch.autograd import Variable
 from tqdm import tqdm
 
 from hps.hps import Hps, hp
@@ -24,7 +23,7 @@ def griffin_lim(spectrogram):  # Applies Griffin-Lim's raw.
         return librosa.istft(spectrogram, hp.hop_length, win_length=hp.win_length, window="hann")
 
     X_best = copy.deepcopy(spectrogram)
-    for i in range(hp.n_iter):
+    for _ in range(hp.n_iter):
         X_t = _invert_spectrogram(X_best)
         est = librosa.stft(X_t, hp.n_fft, hp.hop_length,
                            win_length=hp.win_length)
@@ -81,7 +80,7 @@ def sp2wav(sp):
 
 
 def convert_x(x, c, trainer, enc_only):
-    c_var = Variable(torch.from_numpy(np.array([c]))).cuda()
+    c_var = torch.tensor(torch.from_numpy(np.array([c]))).cuda()
     tensor = torch.from_numpy(np.expand_dims(x, axis=0))
     tensor = tensor.type(torch.FloatTensor)
     converted = trainer.test_step(tensor, c_var, enc_only=enc_only)
@@ -189,7 +188,7 @@ def test_single(trainer, speaker2id_path, result_dir, enc_only, s_speaker, t_spe
     _, spec = get_spectrograms(filename)
     spec_expand = np.expand_dims(spec, axis=0)
     spec_tensor = torch.from_numpy(spec_expand).type(torch.FloatTensor)
-    c = Variable(torch.from_numpy(np.array([speaker2id[t_speaker]]))).cuda()
+    c = torch.tensor(torch.from_numpy(np.array([speaker2id[t_speaker]]))).cuda()
     result = trainer.test_step(spec_tensor, c, enc_only=enc_only)
     result = result.squeeze(axis=0).transpose((1, 0))
     wav_data = spectrogram2wav(result)

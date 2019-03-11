@@ -2,7 +2,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.autograd import Variable
 
 
 class GradReverse(torch.autograd.Function):
@@ -77,6 +76,10 @@ def GLU(inp, layer, res=True):
 
 
 def highway(inp, layers, gates, act):
+    '''
+    a highway network
+    '''
+
     # permute
     batch_size = inp.size(0)
     seq_len = inp.size(2)
@@ -98,7 +101,7 @@ def highway(inp, layers, gates, act):
 def RNN(inp, layer):
     inp_permuted = inp.permute(2, 0, 1)
     state_mul = (int(layer.bidirectional) + 1) * layer.num_layers
-    zero_state = Variable(torch.zeros(
+    zero_state = torch.tensor(torch.zeros(
         state_mul, inp.size(0), layer.hidden_size))
     zero_state = zero_state.cuda() if torch.cuda.is_available() else zero_state
     out_permuted, _ = layer(inp_permuted, zero_state)
@@ -136,7 +139,7 @@ def gumbel_softmax(logits, temperature=0.1):
 
     def _sample_gumbel(shape, eps=1e-20):
         U = torch.rand(shape)
-        dist = -Variable(torch.log(-torch.log(U + eps) + eps))
+        dist = -torch.tensor(torch.log(-torch.log(U + eps) + eps))
         return dist.cuda() if torch.cuda.is_available() else dist
 
     def _gumbel_softmax_sample(logits, temperature):
