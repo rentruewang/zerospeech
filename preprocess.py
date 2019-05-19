@@ -38,7 +38,9 @@ def preprocess(source_path,
             make_dataset(grps, root_dir=test_path, make_test=True)
 
     # stage 1 training samples
-    print('[Processor] - making stage 1 training samples with segment length = ', seg_len)
+    print(
+        '[Processor] - making stage 1 training samples with segment length = ',
+        seg_len)
     make_samples(dataset_path, index_path, speaker2id_path,
                  make_object='all',
                  seg_len=seg_len,
@@ -47,7 +49,9 @@ def preprocess(source_path,
     print()
 
     # stage 2 training source samples
-    print('[Processor] - making stage 2 training source samples with segment length = ', seg_len)
+    print(
+        '[Processor] - making stage 2 training source samples with segment length = ',
+        seg_len)
     make_samples(dataset_path, index_source_path, speaker2id_path,
                  make_object='source',
                  seg_len=seg_len,
@@ -56,7 +60,9 @@ def preprocess(source_path,
     print()
 
     # stage 2 training target samples
-    print('[Processor] - making stage 2 training target samples with segment length = ', seg_len)
+    print(
+        '[Processor] - making stage 2 training target samples with segment length = ',
+        seg_len)
     make_samples(dataset_path, index_target_path, speaker2id_path,
                  make_object='target',
                  seg_len=seg_len,

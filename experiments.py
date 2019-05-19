@@ -13,11 +13,12 @@ from torch.nn import functional as F
 def halt_signals(indices, from_len, to_len, var):
     def map_end_of_syllable(index, from_len, to_len, var):
         co = 1 if random.uniform() < .5 else -1
-        ratio = to_len/from_len
-        lam = var*ratio
-        return min([max([int(index*ratio + co*random.poisson(lam)), 0]), to_len-1])
+        ratio = to_len / from_len
+        lam = var * ratio
+        return min(
+            [max([int(index * ratio + co * random.poisson(lam)), 0]), to_len - 1])
     hs = []
-    if type(indices) == int:
+    if isinstance(indices, int):
         return map_end_of_syllable(indices, from_len, to_len, var)
     for i in indices:
         hs.append(map_end_of_syllable(i, from_len, to_len, var))
@@ -68,9 +69,9 @@ class VoiceToLatent(nn.Module):
         state_history = []
         output_history = []
         for i in range(len(outputs)):
-            out = F.relu(self.rnn_enc['lin'](outputs[i:i+1]))
+            out = F.relu(self.rnn_enc['lin'](outputs[i:i + 1]))
             timestep_output, states = self.rnn_enc['rnn'](
-                out, states*self.decay_factor)
+                out, states * self.decay_factor)
             output_history.append(timestep_output)
             state_history.append(states)
         return outputs, torch.cat(output_history, dim=0), state_history
@@ -116,7 +117,7 @@ class LatentToVoice(nn.Module):
         rnn_outputs = []
         for i in range(l):
             output, state = self.rnn_enc['rnn'](
-                rnn_inputs[i:i+1], states_list[i])
+                rnn_inputs[i:i + 1], states_list[i])
             output = self.rnn_enc['lin'](F.relu(output, inplace=True))
             rnn_outputs.append(output)
             states_history.append(state)
@@ -128,7 +129,8 @@ class LatentToVoice(nn.Module):
 
 
 class Critic(nn.Module):
-    def __init__(self, input_size, hidden_size, num_layers, categories=1, ns=.95):
+    def __init__(self, input_size, hidden_size,
+                 num_layers, categories=1, ns=.95):
         super().__init__()
         self.trans = nn.Linear(in_features=input_size,
                                out_features=hidden_size)
@@ -156,7 +158,7 @@ class SyllableEnds(nn.Module):
     def __init__(self, state_num_layers, state_hidden_size):
         super().__init__()
         self.score = nn.Linear(
-            in_features=state_num_layers*state_hidden_size, out_features=1)
+            in_features=state_num_layers * state_hidden_size, out_features=1)
 
     def forward(self, state_inputs):
         state_list = []
@@ -164,7 +166,7 @@ class SyllableEnds(nn.Module):
             state_list.append(state.view(state.shape[1], -1))
         B = [int(s.shape[0]) for s in state_list]
         max_b = max(B)
-        assert not any([max_b-b for b in B])
+        assert not any([max_b - b for b in B])
         del B
         return [F.sigmoid(self.score(s).squeeze_(-1)) for s in state_list]
 
@@ -180,7 +182,8 @@ class NextSyllable(nn.Module):
         })
 
     def forward(self, inputs, batch=False):
-        # inputs: encoded states -> shape: num_layers, N, hidden if batch else num_layers, hidden
+        # inputs: encoded states -> shape: num_layers, N, hidden if batch else
+        # num_layers, hidden
         shapes = inputs.shape
         if batch:
             inputs = inputs.view(shapes[1], -1)
@@ -211,7 +214,7 @@ class FromStatesToVoice(nn.Module):
         assert list(next_state.shape) == shapes
         compact_p = F.tanh(self.compact(previous_state))
         compact_n = F.tanh(self.compact(next_state))
-        diff = compact_n-compact_p
+        diff = compact_n - compact_p
         shapes[-1] = self.hidden_size
         states = diff.view(*shapes)
         voice = torch.zeros((1, shapes[1], 1))
@@ -226,8 +229,8 @@ class FromStatesToVoice(nn.Module):
 
 def slice_from_tensor(tensor, timesteps):
     tensor_slices = []
-    for i in range(0, tensor.shape[1]-timesteps+1, timesteps):
-        tensor_slices.append(tensor[:, i:i+timesteps])
+    for i in range(0, tensor.shape[1] - timesteps + 1, timesteps):
+        tensor_slices.append(tensor[:, i:i + timesteps])
     return tensor_slices
 
 
@@ -395,20 +398,21 @@ def test():
         interval = []
         for aot in agent_out_tensor:
             args1 = np.argwhere(aot == 1).squeeze(-1)
-            interval.append([args1[i+1]-args1[i] for i in range(len(args1)-1)])
+            interval.append([args1[i + 1] - args1[i]
+                             for i in range(len(args1) - 1)])
         print(interval[-1][-1])
 
         # nsyl
         nsyl_out = []
         for es in end_states:
-            nsyl_out.append([nsyl(es[i]) for i in range(len(es)-1)])
+            nsyl_out.append([nsyl(es[i]) for i in range(len(es) - 1)])
 
         # fstv
         fstv_out = []
         for es, itv in zip(end_states, interval):
             lst = []
-            for t in range(len(es)-1):
-                a, b = es[t], es[t+1]
+            for t in range(len(es) - 1):
+                a, b = es[t], es[t + 1]
                 # shape: num_layers, hidden_size
                 a, b = a.unsqueeze(1), b.unsqueeze(1)
                 lst.append(fstv(a, b, itv[t]))

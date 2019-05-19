@@ -27,8 +27,8 @@ class GumbelSoftmax:
 
     def __call__(self, inputs):
         sample = self.gumbel.sample(inputs.shape)
-        x = torch.log(inputs)+sample
-        return F.softmax(x/self.temperature, dim=self.dim)
+        x = torch.log(inputs) + sample
+        return F.softmax(x / self.temperature, dim=self.dim)
 
 
 class ClassEncoder(nn.Module):
@@ -86,13 +86,15 @@ def clustering(inputs, n_clusters):
             self.k_means = k_means
             self.shapes = shapes
 
-        def __call__(self, inputs, device='cuda'if cuda.is_available() else 'cpu'):
+        def __call__(self, inputs,
+                     device='cuda'if cuda.is_available() else 'cpu'):
             inputs = np.array(inputs)
             if inputs.shape == self.shapes[1:]:
                 inputs = np.expand_dims(inputs, 0)
             cls = np.array([self.k_means.predict(i.reshape(1, -1))
                             for i in inputs])
-            return torch.tensor(np.array([self.k_means.cluster_centers_[c].reshape(*self.shapes[1:]) for c in cls]), device=device)
+            return torch.tensor(np.array([self.k_means.cluster_centers_[
+                                c].reshape(*self.shapes[1:]) for c in cls]), device=device)
     k_means = KMeans(n_clusters=n_clusters)
     reshaped = inputs.reshape(inputs.shape[0], -1)
     k_means.fit(reshaped)
@@ -134,7 +136,8 @@ def finetune_discrete_decoder(trainer, look_up, model_path, flag='train'):
     print()
 
 
-def discrete_test(trainer, data_path, speaker2id_path, result_dir, enc_only, flag):
+def discrete_test(trainer, data_path, speaker2id_path,
+                  result_dir, enc_only, flag):
 
     f_h5 = h5py.File(data_path, 'r')
 
@@ -189,4 +192,4 @@ def discrete_main(args):
          args.result_dir, args.enc_only, args.flag)
     finetune_discrete_decoder(trainer, look_up, model_path)
     discrete_test(trainer, args.dataset_path, args.speaker2id_path,
-                  'discrete_'+args.result_dir, args.enc_only, args.flag)
+                  'discrete_' + args.result_dir, args.enc_only, args.flag)

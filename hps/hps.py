@@ -11,8 +11,8 @@ class processing_hyperparams(object):
         self.n_fft = 1024  # fft points (samples)
         self.frame_shift = 0.0125  # seconds
         self.frame_length = 0.05  # seconds
-        self.hop_length = int(self.sr*self.frame_shift)  # samples.
-        self.win_length = int(self.sr*self.frame_length)  # samples.
+        self.hop_length = int(self.sr * self.frame_shift)  # samples.
+        self.win_length = int(self.sr * self.frame_length)  # samples.
         self.n_mels = 80  # Number of Mel banks to generate
         self.power = 1.2  # Exponent for amplifying the predicted magnitude
         self.n_iter = 300  # Number of inversion iterations

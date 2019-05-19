@@ -15,7 +15,8 @@ from utils import (Logger, calculate_gradients_penalty, cc, grad_clip,
 
 
 class Trainer(object):
-    def __init__(self, hps, data_loader, targeted_G, one_hot, binary_output, binary_ver, log_dir='./log/'):
+    def __init__(self, hps, data_loader, targeted_G, one_hot,
+                 binary_output, binary_ver, log_dir='./log/'):
         self.hps = hps
         self.data_loader = data_loader
         self.model_kept = []
@@ -28,9 +29,9 @@ class Trainer(object):
         if not self.targeted_G:
             self.sample_weights = torch.ones(hps.n_speakers)
         else:
-            self.sample_weights = torch.cat((torch.zeros(hps.n_speakers-hps.n_target_speakers),
+            self.sample_weights = torch.cat((torch.zeros(hps.n_speakers - hps.n_target_speakers),
                                              torch.ones(hps.n_target_speakers)), dim=0)
-            self.shift_c = to_var(torch.from_numpy(np.array([int(hps.n_speakers-hps.n_target_speakers)
+            self.shift_c = to_var(torch.from_numpy(np.array([int(hps.n_speakers - hps.n_target_speakers)
                                                              for _ in range(hps.batch_size)])), requires_grad=False)
         self.build_model()
 
@@ -110,7 +111,7 @@ class Trainer(object):
 
     def set_eval(self):
         self.testing_shift_c = torch.tensor(torch.from_numpy(
-            np.array([int(self.hps.n_speakers-self.hps.n_target_speakers)]))).cuda()
+            np.array([int(self.hps.n_speakers - self.hps.n_target_speakers)]))).cuda()
         self.Encoder.eval()
         self.Decoder.eval()
         self.Generator.eval()
@@ -125,7 +126,8 @@ class Trainer(object):
         if not enc_only:
             print('Testing with Autoencoder + Generator: ',
                   enc.data.cpu().numpy())
-            if self.targeted_G and (c - self.testing_shift_c).data.cpu().numpy()[0] not in range(self.hps.n_target_speakers):
+            if self.targeted_G and (c - self.testing_shift_c).data.cpu().numpy()[
+                    0] not in range(self.hps.n_target_speakers):
                 raise RuntimeError(
                     'This generator can only convert to target speakers!')
             x_tilde += self.Generator(enc, c) if not self.targeted_G else self.Generator(
@@ -141,8 +143,8 @@ class Trainer(object):
 
     def sample_c(self, size):
         c_sample = torch.tensor(torch.multinomial(self.sample_weights,
-                                              num_samples=size, replacement=True),
-                            requires_grad=False)
+                                                  num_samples=size, replacement=True),
+                                requires_grad=False)
         c_sample = c_sample.cuda() if torch.cuda.is_available() else c_sample
         return c_sample
 
@@ -284,7 +286,7 @@ class Trainer(object):
                     enc = self.encode_step(x)
                     _, z_mean, z_log_var = enc
                     kl_loss = (1 + z_log_var - z_mean**2 -
-                               torch.exp(z_log_var)).sum(-1)*-.5
+                               torch.exp(z_log_var)).sum(-1) * -.5
                     kl_loss = kl_loss.sum()
                     # classify speaker
                     logits = self.clf_step(enc)
@@ -394,7 +396,7 @@ class Trainer(object):
                         f'{flag}/real_loss_clf': loss_clf.item(),
                         f'{flag}/real_acc': acc,
                     }
-                    slot_value = (step, iteration+1, hps.patch_iters) + \
+                    slot_value = (step, iteration + 1, hps.patch_iters) + \
                         tuple([value for value in info.values()])
                     log = 'patch_D-%d:[%06d/%06d], w_dis=%.2f, gp=%.2f, loss_clf=%.2f, acc=%.2f'
                     print(log % slot_value, end='\r')
@@ -438,7 +440,7 @@ class Trainer(object):
                     f'{flag}/fake_loss_clf': loss_clf.item(),
                     f'{flag}/fake_acc': acc,
                 }
-                slot_value = (iteration+1, hps.patch_iters) + \
+                slot_value = (iteration + 1, hps.patch_iters) + \
                     tuple([value for value in info.values()])
                 log = 'patch_G:[%06d/%06d], loss_adv=%.2f, loss_clf=%.2f, acc=%.2f'
                 print(log % slot_value, end='\r')

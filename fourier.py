@@ -29,13 +29,13 @@ def pad(arr, length, pad_val):
 
 
 def squared_dist(arr1, arr2):
-    return ((arr1-arr2)**2).sum()
+    return ((arr1 - arr2)**2).sum()
 
 
 def k_means(use_sklearn=True):
     class KM:
         def compute_distance(self, a, b):
-            return (a-b)**2
+            return (a - b)**2
 
         def __init__(self, n_clusters=8, max_iter=300):
             self.n_clusters = n_clusters
@@ -53,7 +53,7 @@ def k_means(use_sklearn=True):
                         random.shuffle(x_p)
                         self.centre[i] = x_p[0]
                     else:
-                        self.centre[i] = sum(lst)/len(lst)
+                        self.centre[i] = sum(lst) / len(lst)
 
         def predict(self, X):
             p = np.zeros(len(X))
@@ -108,15 +108,15 @@ class WavDataset(Dataset):
             source.append(src)
             speaker.append(spk)
 
-        self.rate = sum(rate)//len(rate)
-        assert not any([r-self.rate for r in rate])
+        self.rate = sum(rate) // len(rate)
+        assert not any([r - self.rate for r in rate])
 
         fft_algorithm, timesteps = fft_s
         self.data = []
         for entry in data:
             new_entry = []
-            for i in range(0, len(entry)-timesteps+1, timesteps):
-                new_entry.append(fft_algorithm(entry[i:i+timesteps]))
+            for i in range(0, len(entry) - timesteps + 1, timesteps):
+                new_entry.append(fft_algorithm(entry[i:i + timesteps]))
             self.data.append(np.absolute(np.array(new_entry).astype(dtype)))
         self.data = [torch.tensor(d, device=device) for d in self.data]
         self.source = source
@@ -161,7 +161,8 @@ class FetchData:
 # modules
 # `class Module` can be `Encoder`, `Decoder`, or even `Critic`
 class Module(nn.Module):
-    def __init__(self, input_len, output_len, num_layers=3, rnn=False, discrete=False):
+    def __init__(self, input_len, output_len,
+                 num_layers=3, rnn=False, discrete=False):
         super().__init__()
         self.input_len = input_len
         self.output_len = output_len
@@ -173,19 +174,19 @@ class Module(nn.Module):
             self.hidden_sizes = []
         for i in range(num_layers):
             if rnn:
-                input_size = (input_len*(num_layers-i) +
-                              output_len*i)//num_layers
-                hidden_size = (input_len*(num_layers-i-1) +
-                               output_len*(i+1))//num_layers
+                input_size = (input_len * (num_layers - i) +
+                              output_len * i) // num_layers
+                hidden_size = (input_len * (num_layers - i - 1) +
+                               output_len * (i + 1)) // num_layers
                 self.hidden_sizes.append(hidden_size)
                 module_list.append(nn.GRU(input_size=input_size,
                                           hidden_size=hidden_size,
                                           num_layers=1))
             else:
-                in_features = (input_len*(num_layers-i) +
-                               output_len*i)//num_layers
-                out_features = (input_len*(num_layers-i-1) +
-                                output_len*(i+1))//num_layers
+                in_features = (input_len * (num_layers - i) +
+                               output_len * i) // num_layers
+                out_features = (input_len * (num_layers - i - 1) +
+                                output_len * (i + 1)) // num_layers
                 module_list.append(nn.Linear(in_features, out_features))
         self.layers = nn.ModuleList(module_list)
 
@@ -209,7 +210,7 @@ class Decoder(nn.Module):
         super().__init__()
         self.module = nn.Module(*args, **kwargs)
         self.linear = nn.Linear(
-            in_features=module.input_len+1, out_features=module.output_len)
+            in_features=module.input_len + 1, out_features=module.output_len)
 
     def forward(self, inputs, cls, states=None):
         outputs = self.module(inputs, states)
@@ -309,14 +310,14 @@ def train_gan(data, from_speaker, enc, dec, gen, cls2, dis,
         torch.sigmoid(dis_real[-1]), torch.tensor([[1.]], device=device))
     fake_loss = F.binary_cross_entropy(
         torch.sigmoid(dis_fake[-1]), torch.tensor([[0.]], device=device))
-    loss = real_loss+fake_loss
+    loss = real_loss + fake_loss
 
     dis_optim.zero_grad()
     loss.backward(retain_graph=True)
     dis_optim.step()
 
     if not noclass:
-        loss = -closs-fake_loss
+        loss = -closs - fake_loss
     else:
         loss = fake_loss
     gen_optim.zero_grad()
@@ -324,7 +325,8 @@ def train_gan(data, from_speaker, enc, dec, gen, cls2, dis,
     gen_optim.step()
 
 
-def train_ddec(train_data, enc, dec, target_dec, kmeans, rnn=True, device='cpu'):
+def train_ddec(train_data, enc, dec, target_dec,
+               kmeans, rnn=True, device='cpu'):
     enc, _ = enc
     dec, _ = dec
     target_dec, td_optim = target_dec
@@ -366,10 +368,10 @@ def shuffle(action_list, input_sentence):
     assert len(action_list) == len(input_sentence)
     res = []
     index = 0
-    for i in range(len(action_list)-1):
+    for i in range(len(action_list) - 1):
         if action_list[i].item() == 1:
-            res.append(input_sentence[index:i+1])
-            index = i+1
+            res.append(input_sentence[index:i + 1])
+            index = i + 1
     if index != len(action_list):
         res.append(input_sentence[index:])
     random.shuffle(res)
@@ -438,7 +440,7 @@ def train_eos(train_data, enc, eos, ldis, rnn=True, device='cpu'):
 
         loss = torch.tensor(0., device=device)
         for log_p in log_prob:
-            loss -= log_p*torch.sigmoid(F_output[-1]).sum().item()
+            loss -= log_p * torch.sigmoid(F_output[-1]).sum().item()
         eos_optim.zero_grad()
         loss.backward()
         eos_optim.step()
@@ -494,9 +496,9 @@ if __name__ == "__main__":
         train_data = fetch(dirname, [FetchData.TRAIN, 'unit'],
                            (fft, timesteps), device)
     if timesteps:
-        stepspersec = train_data.rate//timesteps
+        stepspersec = train_data.rate // timesteps
     elif stepspersec:
-        timesteps = train_data.rate//stepspersec
+        timesteps = train_data.rate // stepspersec
 
     speaker_dict = {}
     for speaker_num in train_data.speaker:
@@ -615,7 +617,7 @@ if __name__ == "__main__":
         except (FileNotFoundError, RuntimeError):
             print('retrain target_dec')
 
-    for epoch in range(1, epochs+1):
+    for epoch in range(1, epochs + 1):
         print('vae epoch: {}/{}'.format(epoch, epochs))
 
         for index in range(len(train_data)):
@@ -633,7 +635,7 @@ if __name__ == "__main__":
             torch.save({'module': cls1.state_dict(),
                         'optim': cls1_optim.state_dict()}, f=cls1_path)
 
-    for epoch in range(1, epochs+1):
+    for epoch in range(1, epochs + 1):
         print('gan epoch: {}/{}'.format(epoch, epochs))
 
         for index in range(len(train_data)):
@@ -641,7 +643,7 @@ if __name__ == "__main__":
                 1) if rnn else train_data[index][0]
             input_speaker = train_data[index][2]
             train_gan(input_data, input_speaker, [enc, enc_optim], [dec, dec_optim], [
-                      gen, gen_optim], [cls2, cls2_optim], [dis, dis_optim],  rnn, device, noclass)
+                      gen, gen_optim], [cls2, cls2_optim], [dis, dis_optim], rnn, device, noclass)
 
         if save:
             torch.save({'module': gen.state_dict(),
@@ -655,7 +657,7 @@ if __name__ == "__main__":
     kmeans = k_means(True)(n_clusters=n_clusters)
     kmeans.fit(ht)
 
-    for epoch in range(1, epochs+1):
+    for epoch in range(1, epochs + 1):
         print('target epoch: {}/{}'.format(epoch, epochs))
         train_ddec(train_data, [enc, enc_optim], [
                    dec, dec_optim], [target_dec, td_optim], kmeans, rnn, device)
@@ -664,7 +666,7 @@ if __name__ == "__main__":
             torch.save({'module': target_dec.state_dict(),
                         'optim': td_optim.state_dict()}, f=td_path)
 
-    for epoch in range(1, episodes+1):
+    for epoch in range(1, episodes + 1):
         print('End of sentence episode: {}/{}'.format(epoch, epochs))
         train_eos(train_data, [enc, enc_optim], [
                   eos, eos_optim], [ldis, ldis_optim], rnn, device)

@@ -65,8 +65,8 @@ if __name__ == '__main__':
                            default='./data/speaker2id.json', help='records speaker and speaker id')
 
     model_path = parser.add_argument_group('model_path')
-    model_path.add_argument(
-        '--hps_path', type=str, default='./hps/zerospeech.json', help='hyperparameter path')
+    model_path.add_argument('--hps_path', type=str,
+                            default='./hps/zerospeech.json', help='hyperparameter path')
     model_path.add_argument('--ckpt_dir', type=str, default='./ckpt',
                             help='checkpoint directory for training storage')
     model_path.add_argument('--result_dir', type=str, default='./result',
@@ -127,10 +127,12 @@ if __name__ == '__main__':
             # Stage 1 pre-train: encoder-decoder reconstruction
             trainer.train(model_path, args.flag, mode='pretrain_AE')
             # trainer.train(model_path, args.flag, mode='pretrain_C')  # Stage 1 pre-train: classifier-1
-            # trainer.train(model_path, args.flag, mode='train') 		 # Stage 1 training
+            # trainer.train(model_path, args.flag, mode='train')
+            # # Stage 1 training
 
             # trainer.add_duo_loader(source_loader, target_loader)
-            # trainer.train(model_path, args.flag, mode='patchGAN')	# Stage 2 training
+            # trainer.train(model_path, args.flag, mode='patchGAN')   # Stage 2
+            # training
 
     if args.test or args.test_single:
 

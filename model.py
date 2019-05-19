@@ -17,22 +17,22 @@ class GradReverse(torch.autograd.Function):
 
 
 def pad_layer(inp, layer, is_2d=False):
-    if type(layer.kernel_size) == tuple:
+    if isinstance(layer.kernel_size, tuple):
         kernel_size = layer.kernel_size[0]
     else:
         kernel_size = layer.kernel_size
     if not is_2d:
         if kernel_size % 2 == 0:
-            pad = (kernel_size//2, kernel_size//2 - 1)
+            pad = (kernel_size // 2, kernel_size // 2 - 1)
         else:
-            pad = (kernel_size//2, kernel_size//2)
+            pad = (kernel_size // 2, kernel_size // 2)
     else:
         if kernel_size % 2 == 0:
-            pad = (kernel_size//2, kernel_size//2 - 1,
-                   kernel_size//2, kernel_size//2 - 1)
+            pad = (kernel_size // 2, kernel_size // 2 - 1,
+                   kernel_size // 2, kernel_size // 2 - 1)
         else:
-            pad = (kernel_size//2, kernel_size//2,
-                   kernel_size//2, kernel_size//2)
+            pad = (kernel_size // 2, kernel_size // 2,
+                   kernel_size // 2, kernel_size // 2)
     # padding
     inp = F.pad(inp,
                 pad=pad,
@@ -62,7 +62,7 @@ def GLU(inp, layer, res=True):
     channels = layer.out_channels // 2
     # padding
     out = F.pad(inp.unsqueeze(dim=3), pad=(0, 0, kernel_size //
-                                           2, kernel_size//2), mode='constant', value=0.)
+                                           2, kernel_size // 2), mode='constant', value=0.)
     out = out.squeeze(dim=3)
     out = layer(out)
     # gated
@@ -86,7 +86,7 @@ def highway(inp, layers, gates, act):
     inp_permuted = inp.permute(0, 2, 1)
     # merge dim
     out_expand = inp_permuted.contiguous().view(
-        batch_size*seq_len, inp_permuted.size(2))
+        batch_size * seq_len, inp_permuted.size(2))
     for l, g in zip(layers, gates):
         H = l(out_expand)
         H = act(H)
@@ -114,7 +114,7 @@ def linear(inp, layer):
     hidden_dim = inp.size(1)
     seq_len = inp.size(2)
     inp_permuted = inp.permute(0, 2, 1)
-    inp_expand = inp_permuted.contiguous().view(batch_size*seq_len, hidden_dim)
+    inp_expand = inp_permuted.contiguous().view(batch_size * seq_len, hidden_dim)
     out_expand = layer(inp_expand)
     out_permuted = out_expand.view(batch_size, seq_len, out_expand.size(1))
     out = out_permuted.permute(0, 2, 1)
@@ -216,7 +216,8 @@ class PatchDiscriminator(nn.Module):
 
 
 class SpeakerClassifier(nn.Module):
-    def __init__(self, c_in=512, c_h=512, n_class=8, dp=0.1, ns=0.01, seg_len=128):
+    def __init__(self, c_in=512, c_h=512, n_class=8,
+                 dp=0.1, ns=0.01, seg_len=128):
         super(SpeakerClassifier, self).__init__()
         self.dp, self.ns = dp, ns
         self.conv1 = nn.Conv1d(c_in, c_h, kernel_size=5)
@@ -225,12 +226,12 @@ class SpeakerClassifier(nn.Module):
         self.conv4 = nn.Conv1d(c_h, c_h, kernel_size=5)
         self.conv5 = nn.Conv1d(c_h, c_h, kernel_size=5)
         self.conv6 = nn.Conv1d(c_h, c_h, kernel_size=5)
-        self.conv7 = nn.Conv1d(c_h, c_h//2, kernel_size=3)
-        self.conv8 = nn.Conv1d(c_h//2, c_h//4, kernel_size=3)
+        self.conv7 = nn.Conv1d(c_h, c_h // 2, kernel_size=3)
+        self.conv8 = nn.Conv1d(c_h // 2, c_h // 4, kernel_size=3)
         if seg_len == 128:
-            self.conv9 = nn.Conv1d(c_h//4, n_class, kernel_size=16)
+            self.conv9 = nn.Conv1d(c_h // 4, n_class, kernel_size=16)
         elif seg_len == 64:
-            self.conv9 = nn.Conv1d(c_h//4, n_class, kernel_size=8)
+            self.conv9 = nn.Conv1d(c_h // 4, n_class, kernel_size=8)
         else:
             raise NotImplementedError(
                 'Segement length {} is not supported!'.format(seg_len))
@@ -241,7 +242,7 @@ class SpeakerClassifier(nn.Module):
         self.ins_norm1 = nn.InstanceNorm1d(c_h)
         self.ins_norm2 = nn.InstanceNorm1d(c_h)
         self.ins_norm3 = nn.InstanceNorm1d(c_h)
-        self.ins_norm4 = nn.InstanceNorm1d(c_h//4)
+        self.ins_norm4 = nn.InstanceNorm1d(c_h // 4)
 
     def conv_block(self, x, conv_layers, after_layers, res=True):
         out = x
@@ -276,7 +277,7 @@ class CBHG(nn.Module):
         )
         self.bn1s = nn.ModuleList([nn.BatchNorm1d(128) for _ in range(1, 9)])
         self.mp1 = nn.MaxPool1d(kernel_size=2, stride=1)
-        self.conv2 = nn.Conv1d(len(self.conv1s)*128, 256,
+        self.conv2 = nn.Conv1d(len(self.conv1s) * 128, 256,
                                kernel_size=3, padding=1)
         self.bn2 = nn.BatchNorm1d(256)
         self.conv3 = nn.Conv1d(256, 80, kernel_size=3, padding=1)
@@ -319,19 +320,19 @@ class Decoder(nn.Module):
     def __init__(self, c_in=512, c_out=513, c_h=512, c_a=8, ns=0.2):
         super(Decoder, self).__init__()
         self.ns = ns
-        self.conv1 = nn.Conv1d(c_in, 2*c_h, kernel_size=3)
+        self.conv1 = nn.Conv1d(c_in, 2 * c_h, kernel_size=3)
         self.conv2 = nn.Conv1d(c_h, c_h, kernel_size=3)
-        self.conv3 = nn.Conv1d(c_h, 2*c_h, kernel_size=3)
+        self.conv3 = nn.Conv1d(c_h, 2 * c_h, kernel_size=3)
         self.conv4 = nn.Conv1d(c_h, c_h, kernel_size=3)
-        self.conv5 = nn.Conv1d(c_h, 2*c_h, kernel_size=3)
+        self.conv5 = nn.Conv1d(c_h, 2 * c_h, kernel_size=3)
         self.conv6 = nn.Conv1d(c_h, c_h, kernel_size=3)
         self.dense1 = nn.Linear(c_h, c_h)
         self.dense2 = nn.Linear(c_h, c_h)
         self.dense3 = nn.Linear(c_h, c_h)
         self.dense4 = nn.Linear(c_h, c_h)
-        self.RNN = nn.GRU(input_size=c_h, hidden_size=c_h//2,
+        self.RNN = nn.GRU(input_size=c_h, hidden_size=c_h // 2,
                           num_layers=1, bidirectional=True)
-        self.dense5 = nn.Linear(2*c_h + c_h, c_h)
+        self.dense5 = nn.Linear(2 * c_h + c_h, c_h)
         self.linear = nn.Linear(c_h, c_out)
         # normalization layer
         self.ins_norm1 = nn.InstanceNorm1d(c_h)
@@ -400,14 +401,15 @@ class Decoder(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self, c_in=513, c_h1=128, c_h2=512, c_h3=128, ns=0.2, dp=0.5, emb_size=512, one_hot=False):
+    def __init__(self, c_in=513, c_h1=128, c_h2=512, c_h3=128,
+                 ns=0.2, dp=0.5, emb_size=512, one_hot=False):
         super(Encoder, self).__init__()
         self.ns = ns
         self.one_hot = one_hot
         self.conv1s = nn.ModuleList(
             [nn.Conv1d(c_in, c_h1, kernel_size=k) for k in range(1, 8)]
         )
-        self.conv2 = nn.Conv1d(len(self.conv1s)*c_h1 +
+        self.conv2 = nn.Conv1d(len(self.conv1s) * c_h1 +
                                c_in, c_h2, kernel_size=1)
         self.conv3 = nn.Conv1d(c_h2, c_h2, kernel_size=5)
         self.conv4 = nn.Conv1d(c_h2, c_h2, kernel_size=5, stride=2)
@@ -421,7 +423,7 @@ class Encoder(nn.Module):
         self.dense4 = nn.Linear(c_h2, c_h2)
         self.RNN = nn.GRU(input_size=c_h2, hidden_size=c_h3,
                           num_layers=1, bidirectional=True)
-        self.linear = nn.Linear(c_h2 + 2*c_h3, emb_size)
+        self.linear = nn.Linear(c_h2 + 2 * c_h3, emb_size)
         # normalization layer
         self.ins_norm1 = nn.InstanceNorm1d(c_h2)
         self.ins_norm2 = nn.InstanceNorm1d(c_h2)
