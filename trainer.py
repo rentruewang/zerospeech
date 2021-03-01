@@ -10,13 +10,20 @@ from model import PatchDiscriminator
 from parallages import VariationalDecoder as Decoder
 from parallages import VariationalEncoder as Encoder
 from parallages import VariationalSpeakerClassifier as SpeakerClassifier
-from utils import (Logger, calculate_gradients_penalty, cc, grad_clip,
-                   reset_grad, to_var)
+from utils import Logger, calculate_gradients_penalty, cc, grad_clip, reset_grad, to_var
 
 
 class Trainer(object):
-    def __init__(self, hps, data_loader, targeted_G, one_hot,
-                 binary_output, binary_ver, log_dir='./log/'):
+    def __init__(
+        self,
+        hps,
+        data_loader,
+        targeted_G,
+        one_hot,
+        binary_output,
+        binary_ver,
+        log_dir="./log/",
+    ):
         self.hps = hps
         self.data_loader = data_loader
         self.model_kept = []
@@ -29,10 +36,24 @@ class Trainer(object):
         if not self.targeted_G:
             self.sample_weights = torch.ones(hps.n_speakers)
         else:
-            self.sample_weights = torch.cat((torch.zeros(hps.n_speakers - hps.n_target_speakers),
-                                             torch.ones(hps.n_target_speakers)), dim=0)
-            self.shift_c = to_var(torch.from_numpy(np.array([int(hps.n_speakers - hps.n_target_speakers)
-                                                             for _ in range(hps.batch_size)])), requires_grad=False)
+            self.sample_weights = torch.cat(
+                (
+                    torch.zeros(hps.n_speakers - hps.n_target_speakers),
+                    torch.ones(hps.n_target_speakers),
+                ),
+                dim=0,
+            )
+            self.shift_c = to_var(
+                torch.from_numpy(
+                    np.array(
+                        [
+                            int(hps.n_speakers - hps.n_target_speakers)
+                            for _ in range(hps.batch_size)
+                        ]
+                    )
+                ),
+                requires_grad=False,
+            )
         self.build_model()
 
     def build_model(self):
@@ -41,51 +62,91 @@ class Trainer(object):
         emb_size = self.hps.emb_size
         betas = (0.5, 0.9)
 
-        #---stage one---#
-        self.Encoder = cc(Encoder(ns=ns, dp=hps.enc_dp, emb_size=emb_size,
-                                  seg_len=hps.seg_len, one_hot=self.one_hot,
-                                  binary_output=self.binary_output, binary_ver=self.binary_ver))
-        self.Decoder = cc(Decoder(ns=ns, c_in=emb_size, c_h=emb_size, c_a=hps.n_speakers,
-                                  seg_len=hps.seg_len, inp_emb=self.one_hot or self.binary_output))
-        self.SpeakerClassifier = cc(SpeakerClassifier(ns=ns, c_in=emb_size if not self.binary_output else emb_size * emb_size,
-                                                      c_h=emb_size, n_class=hps.n_speakers, dp=hps.dis_dp, seg_len=hps.seg_len))
+        # ---stage one---#
+        self.Encoder = cc(
+            Encoder(
+                ns=ns,
+                dp=hps.enc_dp,
+                emb_size=emb_size,
+                seg_len=hps.seg_len,
+                one_hot=self.one_hot,
+                binary_output=self.binary_output,
+                binary_ver=self.binary_ver,
+            )
+        )
+        self.Decoder = cc(
+            Decoder(
+                ns=ns,
+                c_in=emb_size,
+                c_h=emb_size,
+                c_a=hps.n_speakers,
+                seg_len=hps.seg_len,
+                inp_emb=self.one_hot or self.binary_output,
+            )
+        )
+        self.SpeakerClassifier = cc(
+            SpeakerClassifier(
+                ns=ns,
+                c_in=emb_size if not self.binary_output else emb_size * emb_size,
+                c_h=emb_size,
+                n_class=hps.n_speakers,
+                dp=hps.dis_dp,
+                seg_len=hps.seg_len,
+            )
+        )
 
-        #---stage one opts---#
-        params = list(self.Encoder.parameters()) + \
-            list(self.Decoder.parameters())
+        # ---stage one opts---#
+        params = list(self.Encoder.parameters()) + list(self.Decoder.parameters())
         self.ae_opt = optim.Adam(params, lr=self.hps.lr, betas=betas)
         self.clf_opt = optim.Adam(
-            self.SpeakerClassifier.parameters(), lr=self.hps.lr, betas=betas)
+            self.SpeakerClassifier.parameters(), lr=self.hps.lr, betas=betas
+        )
 
-        #---stage two---#
-        self.Generator = cc(Decoder(ns=ns, c_in=emb_size, c_h=emb_size,
-                                    c_a=hps.n_speakers if not self.targeted_G else hps.n_target_speakers))
-        self.PatchDiscriminator = cc(nn.DataParallel(PatchDiscriminator(ns=ns, n_class=hps.n_speakers
-                                                                        if not self.targeted_G else hps.n_target_speakers,
-                                                                        seg_len=hps.seg_len)))
+        # ---stage two---#
+        self.Generator = cc(
+            Decoder(
+                ns=ns,
+                c_in=emb_size,
+                c_h=emb_size,
+                c_a=hps.n_speakers if not self.targeted_G else hps.n_target_speakers,
+            )
+        )
+        self.PatchDiscriminator = cc(
+            nn.DataParallel(
+                PatchDiscriminator(
+                    ns=ns,
+                    n_class=hps.n_speakers
+                    if not self.targeted_G
+                    else hps.n_target_speakers,
+                    seg_len=hps.seg_len,
+                )
+            )
+        )
 
-        #---stage two opts---#
+        # ---stage two opts---#
         self.gen_opt = optim.Adam(
-            self.Generator.parameters(), lr=self.hps.lr, betas=betas)
+            self.Generator.parameters(), lr=self.hps.lr, betas=betas
+        )
         self.patch_opt = optim.Adam(
-            self.PatchDiscriminator.parameters(), lr=self.hps.lr, betas=betas)
+            self.PatchDiscriminator.parameters(), lr=self.hps.lr, betas=betas
+        )
 
     def save_model(self, model_path, name, iteration, model_all=True):
         if model_all:
             all_model = {
-                'encoder': self.Encoder.state_dict(),
-                'decoder': self.Decoder.state_dict(),
-                'generator': self.Generator.state_dict(),
-                'classifier': self.SpeakerClassifier.state_dict(),
-                'patch_discriminator': self.PatchDiscriminator.state_dict(),
+                "encoder": self.Encoder.state_dict(),
+                "decoder": self.Decoder.state_dict(),
+                "generator": self.Generator.state_dict(),
+                "classifier": self.SpeakerClassifier.state_dict(),
+                "patch_discriminator": self.PatchDiscriminator.state_dict(),
             }
         else:
             all_model = {
-                'encoder': self.Encoder.state_dict(),
-                'decoder': self.Decoder.state_dict(),
-                'generator': self.Generator.state_dict(),
+                "encoder": self.Encoder.state_dict(),
+                "decoder": self.Decoder.state_dict(),
+                "generator": self.Generator.state_dict(),
             }
-        new_model_path = '{}-{}-{}'.format(model_path, name, iteration)
+        new_model_path = "{}-{}-{}".format(model_path, name, iteration)
         torch.save(all_model, new_model_path)
         self.model_kept.append(new_model_path)
 
@@ -95,23 +156,25 @@ class Trainer(object):
 
     def load_model(self, model_path, model_all=True, verbose=True):
         if verbose:
-            print('[Trainer] - load model from {}'.format(model_path))
+            print("[Trainer] - load model from {}".format(model_path))
         all_model = torch.load(model_path)
-        self.Encoder.load_state_dict(all_model['encoder'])
-        self.Decoder.load_state_dict(all_model['decoder'])
-        self.Generator.load_state_dict(all_model['generator'])
+        self.Encoder.load_state_dict(all_model["encoder"])
+        self.Decoder.load_state_dict(all_model["decoder"])
+        self.Generator.load_state_dict(all_model["generator"])
         if model_all:
-            self.SpeakerClassifier.load_state_dict(all_model['classifier'])
-            self.PatchDiscriminator.load_state_dict(
-                all_model['patch_discriminator'])
+            self.SpeakerClassifier.load_state_dict(all_model["classifier"])
+            self.PatchDiscriminator.load_state_dict(all_model["patch_discriminator"])
 
     def add_duo_loader(self, source_loader, target_loader):
         self.source_loader = source_loader
         self.target_loader = target_loader
 
     def set_eval(self):
-        self.testing_shift_c = torch.tensor(torch.from_numpy(
-            np.array([int(self.hps.n_speakers - self.hps.n_target_speakers)]))).cuda()
+        self.testing_shift_c = torch.tensor(
+            torch.from_numpy(
+                np.array([int(self.hps.n_speakers - self.hps.n_target_speakers)])
+            )
+        ).cuda()
         self.Encoder.eval()
         self.Decoder.eval()
         self.Generator.eval()
@@ -124,16 +187,20 @@ class Trainer(object):
         enc = self.Encoder(x)
         x_tilde = self.Decoder(enc, c)
         if not enc_only:
-            print('Testing with Autoencoder + Generator: ',
-                  enc.data.cpu().numpy())
+            print("Testing with Autoencoder + Generator: ", enc.data.cpu().numpy())
             if self.targeted_G and (c - self.testing_shift_c).data.cpu().numpy()[
-                    0] not in range(self.hps.n_target_speakers):
+                0
+            ] not in range(self.hps.n_target_speakers):
                 raise RuntimeError(
-                    'This generator can only convert to target speakers!')
-            x_tilde += self.Generator(enc, c) if not self.targeted_G else self.Generator(
-                enc, c - self.testing_shift_c)
+                    "This generator can only convert to target speakers!"
+                )
+            x_tilde += (
+                self.Generator(enc, c)
+                if not self.targeted_G
+                else self.Generator(enc, c - self.testing_shift_c)
+            )
         else:
-            print('Testing with Autoencoder only: ', enc.data.cpu().numpy())
+            print("Testing with Autoencoder only: ", enc.data.cpu().numpy())
         return x_tilde.data.cpu().numpy()
 
     def permute_data(self, data):
@@ -142,9 +209,10 @@ class Trainer(object):
         return C, X
 
     def sample_c(self, size):
-        c_sample = torch.tensor(torch.multinomial(self.sample_weights,
-                                                  num_samples=size, replacement=True),
-                                requires_grad=False)
+        c_sample = torch.tensor(
+            torch.multinomial(self.sample_weights, num_samples=size, replacement=True),
+            requires_grad=False,
+        )
         c_sample = c_sample.cuda() if torch.cuda.is_available() else c_sample
         return c_sample
 
@@ -161,16 +229,18 @@ class Trainer(object):
         D_fake, fake_logits = self.PatchDiscriminator(x_tilde, classify=True)
         if is_dis:
             w_dis = torch.mean(D_real - D_fake)
-            gp = calculate_gradients_penalty(
-                self.PatchDiscriminator, x, x_tilde)
+            gp = calculate_gradients_penalty(self.PatchDiscriminator, x, x_tilde)
             return w_dis, real_logits, gp
         else:
             return -torch.mean(D_fake), fake_logits
 
     def gen_step(self, enc, c):
         x_gen = self.Decoder(enc, c)
-        x_gen += self.Generator(enc, c) if not self.targeted_G else self.Generator(
-            enc, c - self.shift_c)
+        x_gen += (
+            self.Generator(enc, c)
+            if not self.targeted_G
+            else self.Generator(enc, c - self.shift_c)
+        )
         return x_gen
 
     def clf_step(self, enc):
@@ -190,17 +260,17 @@ class Trainer(object):
         _, ind = torch.max(logits, dim=1)
         if shift:
             acc = torch.sum(
-                (ind == y_true - self.shift_c).type(torch.FloatTensor)) / y_true.size(0)
+                (ind == y_true - self.shift_c).type(torch.FloatTensor)
+            ) / y_true.size(0)
         else:
-            acc = torch.sum((ind == y_true).type(
-                torch.FloatTensor)) / y_true.size(0)
+            acc = torch.sum((ind == y_true).type(torch.FloatTensor)) / y_true.size(0)
         return acc
 
-    def train(self, model_path, flag='train', mode='train'):
+    def train(self, model_path, flag="train", mode="train"):
         # load hyperparams
         hps = self.hps
 
-        if mode == 'pretrain_AE':
+        if mode == "pretrain_AE":
             for iteration in range(hps.enc_pretrain_iters):
                 data = next(self.data_loader)
                 c, x = self.permute_data(data)
@@ -216,21 +286,22 @@ class Trainer(object):
 
                 # tb info
                 info = {
-                    f'{flag}/pre_loss_rec': loss_rec.item(),
+                    f"{flag}/pre_loss_rec": loss_rec.item(),
                 }
-                slot_value = (iteration + 1, hps.enc_pretrain_iters) + \
-                    tuple([value for value in info.values()])
-                log = 'pre_AE:[%06d/%06d], loss_rec=%.3f'
-                print(log % slot_value, end='\r')
+                slot_value = (iteration + 1, hps.enc_pretrain_iters) + tuple(
+                    [value for value in info.values()]
+                )
+                log = "pre_AE:[%06d/%06d], loss_rec=%.3f"
+                print(log % slot_value, end="\r")
 
                 if iteration % 100 == 0:
                     for tag, value in info.items():
                         self.logger.scalar_summary(tag, value, iteration + 1)
                 if (iteration + 1) % 1000 == 0:
-                    self.save_model(model_path, 'ae', iteration + 1)
+                    self.save_model(model_path, "ae", iteration + 1)
             print()
 
-        elif mode == 'pretrain_C':
+        elif mode == "pretrain_C":
             for iteration in range(hps.dis_pretrain_iters):
 
                 data = next(self.data_loader)
@@ -252,32 +323,32 @@ class Trainer(object):
                 # calculate acc
                 acc = self.cal_acc(logits, c)
                 info = {
-                    f'{flag}/pre_loss_clf': loss_clf.item(),
-                    f'{flag}/pre_acc': acc,
+                    f"{flag}/pre_loss_clf": loss_clf.item(),
+                    f"{flag}/pre_acc": acc,
                 }
-                slot_value = (iteration + 1, hps.dis_pretrain_iters) + \
-                    tuple([value for value in info.values()])
-                log = 'pre_C:[%06d/%06d], loss_clf=%.2f, acc=%.2f'
+                slot_value = (iteration + 1, hps.dis_pretrain_iters) + tuple(
+                    [value for value in info.values()]
+                )
+                log = "pre_C:[%06d/%06d], loss_clf=%.2f, acc=%.2f"
 
-                print(log % slot_value, end='\r')
+                print(log % slot_value, end="\r")
                 if iteration % 100 == 0:
                     for tag, value in info.items():
                         self.logger.scalar_summary(tag, value, iteration + 1)
                 if (iteration + 1) % 1000 == 0:
-                    self.save_model(model_path, 'c', iteration + 1)
+                    self.save_model(model_path, "c", iteration + 1)
             print()
 
-        elif mode == 'train':
+        elif mode == "train":
             for iteration in range(hps.iters):
 
                 # calculate current alpha
                 if iteration < hps.lat_sched_iters:
-                    current_alpha = hps.alpha_enc * \
-                        (iteration / hps.lat_sched_iters)
+                    current_alpha = hps.alpha_enc * (iteration / hps.lat_sched_iters)
                 else:
                     current_alpha = hps.alpha_enc
 
-                #==================train D==================#
+                # ==================train D==================#
                 for step in range(hps.n_latent_steps):
                     data = next(self.data_loader)
                     c, x = self.permute_data(data)
@@ -285,8 +356,9 @@ class Trainer(object):
                     # encode
                     enc = self.encode_step(x)
                     _, z_mean, z_log_var = enc
-                    kl_loss = (1 + z_log_var - z_mean**2 -
-                               torch.exp(z_log_var)).sum(-1) * -.5
+                    kl_loss = (1 + z_log_var - z_mean ** 2 - torch.exp(z_log_var)).sum(
+                        -1
+                    ) * -0.5
                     kl_loss = kl_loss.sum()
                     # classify speaker
                     logits = self.clf_step(enc)
@@ -302,19 +374,19 @@ class Trainer(object):
                     # calculate acc
                     acc = self.cal_acc(logits, c)
                     info = {
-                        f'{flag}/D_loss_clf': loss_clf.item(),
-                        f'{flag}/D_acc': acc,
+                        f"{flag}/D_loss_clf": loss_clf.item(),
+                        f"{flag}/D_acc": acc,
                     }
-                    slot_value = (step, iteration + 1, hps.iters) + \
-                        tuple([value for value in info.values()])
-                    log = 'D-%d:[%06d/%06d], loss_clf=%.2f, acc=%.2f'
+                    slot_value = (step, iteration + 1, hps.iters) + tuple(
+                        [value for value in info.values()]
+                    )
+                    log = "D-%d:[%06d/%06d], loss_clf=%.2f, acc=%.2f"
 
-                    print(log % slot_value, end='\r')
+                    print(log % slot_value, end="\r")
                     if iteration % 100 == 0:
                         for tag, value in info.items():
-                            self.logger.scalar_summary(
-                                tag, value, iteration + 1)
-                #==================train G==================#
+                            self.logger.scalar_summary(tag, value, iteration + 1)
+                # ==================train G==================#
                 data = next(self.data_loader)
                 c, x = self.permute_data(data)
 
@@ -338,26 +410,29 @@ class Trainer(object):
                 self.ae_opt.step()
 
                 info = {
-                    f'{flag}/loss_rec': loss_rec.item(),
-                    f'{flag}/G_loss_clf': loss_clf.item(),
-                    f'{flag}/alpha': current_alpha,
-                    f'{flag}/G_acc': acc,
+                    f"{flag}/loss_rec": loss_rec.item(),
+                    f"{flag}/G_loss_clf": loss_clf.item(),
+                    f"{flag}/alpha": current_alpha,
+                    f"{flag}/G_acc": acc,
                 }
-                slot_value = (iteration + 1, hps.iters) + \
-                    tuple([value for value in info.values()])
-                log = 'G:[%06d/%06d], loss_rec=%.3f, loss_clf=%.2f, alpha=%.2e, acc=%.2f'
-                print(log % slot_value, end='\r')
+                slot_value = (iteration + 1, hps.iters) + tuple(
+                    [value for value in info.values()]
+                )
+                log = (
+                    "G:[%06d/%06d], loss_rec=%.3f, loss_clf=%.2f, alpha=%.2e, acc=%.2f"
+                )
+                print(log % slot_value, end="\r")
 
                 if iteration % 100 == 0:
                     for tag, value in info.items():
                         self.logger.scalar_summary(tag, value, iteration + 1)
                 if (iteration + 1) % 1000 == 0:
-                    self.save_model(model_path, 's1', iteration + 1)
+                    self.save_model(model_path, "s1", iteration + 1)
             print()
 
-        elif mode == 'patchGAN':
+        elif mode == "patchGAN":
             for iteration in range(hps.patch_iters):
-                #==================train D==================#
+                # ==================train D==================#
                 for step in range(hps.n_patch_steps):
 
                     data_s = next(self.source_loader)
@@ -375,38 +450,40 @@ class Trainer(object):
                     x_tilde = self.gen_step(enc, c_prime)
 
                     # discriminstor
-                    w_dis, real_logits, gp = self.patch_step(
-                        x_t, x_tilde, is_dis=True)
+                    w_dis, real_logits, gp = self.patch_step(x_t, x_tilde, is_dis=True)
 
                     # aux classification loss
                     loss_clf = self.cal_loss(real_logits, c, shift=True)
 
-                    loss = -hps.beta_dis * w_dis + hps.beta_clf * loss_clf + hps.lambda_ * gp
+                    loss = (
+                        -hps.beta_dis * w_dis
+                        + hps.beta_clf * loss_clf
+                        + hps.lambda_ * gp
+                    )
                     reset_grad([self.PatchDiscriminator])
                     loss.backward()
-                    grad_clip([self.PatchDiscriminator],
-                              self.hps.max_grad_norm)
+                    grad_clip([self.PatchDiscriminator], self.hps.max_grad_norm)
                     self.patch_opt.step()
 
                     # calculate acc
                     acc = self.cal_acc(real_logits, c, shift=True)
                     info = {
-                        f'{flag}/w_dis': w_dis.item(),
-                        f'{flag}/gp': gp.item(),
-                        f'{flag}/real_loss_clf': loss_clf.item(),
-                        f'{flag}/real_acc': acc,
+                        f"{flag}/w_dis": w_dis.item(),
+                        f"{flag}/gp": gp.item(),
+                        f"{flag}/real_loss_clf": loss_clf.item(),
+                        f"{flag}/real_acc": acc,
                     }
-                    slot_value = (step, iteration + 1, hps.patch_iters) + \
-                        tuple([value for value in info.values()])
-                    log = 'patch_D-%d:[%06d/%06d], w_dis=%.2f, gp=%.2f, loss_clf=%.2f, acc=%.2f'
-                    print(log % slot_value, end='\r')
+                    slot_value = (step, iteration + 1, hps.patch_iters) + tuple(
+                        [value for value in info.values()]
+                    )
+                    log = "patch_D-%d:[%06d/%06d], w_dis=%.2f, gp=%.2f, loss_clf=%.2f, acc=%.2f"
+                    print(log % slot_value, end="\r")
 
                     if iteration % 100 == 0:
                         for tag, value in info.items():
-                            self.logger.scalar_summary(
-                                tag, value, iteration + 1)
+                            self.logger.scalar_summary(tag, value, iteration + 1)
 
-                #==================train G==================#
+                # ==================train G==================#
                 data_s = next(self.source_loader)
                 data_t = next(self.target_loader)
                 _, x_s = self.permute_data(data_s)
@@ -422,8 +499,7 @@ class Trainer(object):
                 x_tilde = self.gen_step(enc, c_prime)
 
                 # discriminstor
-                loss_adv, fake_logits = self.patch_step(
-                    x_t, x_tilde, is_dis=False)
+                loss_adv, fake_logits = self.patch_step(x_t, x_tilde, is_dis=False)
 
                 # aux classification loss
                 loss_clf = self.cal_loss(fake_logits, c_prime, shift=True)
@@ -436,21 +512,21 @@ class Trainer(object):
                 # calculate acc
                 acc = self.cal_acc(fake_logits, c_prime, shift=True)
                 info = {
-                    f'{flag}/loss_adv': loss_adv.item(),
-                    f'{flag}/fake_loss_clf': loss_clf.item(),
-                    f'{flag}/fake_acc': acc,
+                    f"{flag}/loss_adv": loss_adv.item(),
+                    f"{flag}/fake_loss_clf": loss_clf.item(),
+                    f"{flag}/fake_acc": acc,
                 }
-                slot_value = (iteration + 1, hps.patch_iters) + \
-                    tuple([value for value in info.values()])
-                log = 'patch_G:[%06d/%06d], loss_adv=%.2f, loss_clf=%.2f, acc=%.2f'
-                print(log % slot_value, end='\r')
+                slot_value = (iteration + 1, hps.patch_iters) + tuple(
+                    [value for value in info.values()]
+                )
+                log = "patch_G:[%06d/%06d], loss_adv=%.2f, loss_clf=%.2f, acc=%.2f"
+                print(log % slot_value, end="\r")
 
                 if iteration % 100 == 0:
                     for tag, value in info.items():
                         self.logger.scalar_summary(tag, value, iteration + 1)
                 if (iteration + 1) % 1000 == 0:
-                    self.save_model(model_path, 's2',
-                                    iteration + 1 + hps.iters)
+                    self.save_model(model_path, "s2", iteration + 1 + hps.iters)
             print()
 
         else:

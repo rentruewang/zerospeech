@@ -30,8 +30,7 @@ class DataLoader:
         return self
 
     def __next__(self):
-        samples = [self.dataset[self.index + i]
-                   for i in range(self.batch_size)]
+        samples = [self.dataset[self.index + i] for i in range(self.batch_size)]
         batch = [[s for s in sample] for sample in zip(*samples)]
         batch_tensor = [torch.from_numpy(np.array(data)) for data in batch]
 
@@ -43,11 +42,11 @@ class DataLoader:
 
 
 class Dataset(data.Dataset):
-    def __init__(self, h5_path, index_path, dset='train', seg_len=64):
-        self.dataset = h5py.File(h5_path, 'r')
+    def __init__(self, h5_path, index_path, dset="train", seg_len=64):
+        self.dataset = h5py.File(h5_path, "r")
         with open(index_path) as f_index:
             self.indexes = json.load(f_index)
-        self.indexer = namedtuple('index', ['speaker', 'i', 't'])
+        self.indexer = namedtuple("index", ["speaker", "i", "t"])
         self.seg_len = seg_len
         self.dset = dset
 
@@ -57,7 +56,7 @@ class Dataset(data.Dataset):
         speaker = index.speaker
         i, t = index.i, index.t
         seg_len = self.seg_len
-        data = [speaker, self.dataset[f'{self.dset}/{i}/lin'][t:t + seg_len]]
+        data = [speaker, self.dataset[f"{self.dset}/{i}/lin"][t : t + seg_len]]
         return tuple(data)
 
     def __len__(self):
